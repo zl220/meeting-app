@@ -1,5 +1,6 @@
 package com.meetingapp.repository
 
+import android.util.Log
 import com.meetingapp.api.TranscribeApi
 import com.meetingapp.data.db.dao.AudioChunkDao
 import com.meetingapp.data.db.dao.SegmentDao
@@ -34,16 +35,20 @@ class TranscriptionRepository @Inject constructor(
                 endMs = chunk.endMs
             )
         )
-        val segments = transcribeApi.transcribe(
-            audioFile = chunk.file,
-            meetingId = meetingId,
-            chunkStartMs = chunk.startMs,
-            keywords = keywords,
-            prompt = prompt,
-            languages = languages
-        )
-        segments.forEach { segmentDao.insert(it) }
-        chunkDao.markTranscribed(chunkId)
+        try {
+            val segments = transcribeApi.transcribe(
+                audioFile = chunk.file,
+                meetingId = meetingId,
+                chunkStartMs = chunk.startMs,
+                keywords = keywords,
+                prompt = prompt,
+                languages = languages
+            )
+            segments.forEach { segmentDao.insert(it) }
+            chunkDao.markTranscribed(chunkId)
+        } catch (e: Exception) {
+            Log.e("TranscriptionRepo", "transcribe failed: ${e.message}")
+        }
     }
 
     suspend fun insertAiSegment(segment: Segment) = segmentDao.insert(segment)

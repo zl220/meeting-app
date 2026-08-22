@@ -49,7 +49,7 @@ fun SettingsScreen(
                 label = { Text("AI 唤醒名称") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true,
-                supportingText = { Text("出现在句首时唤醒 AI（如"小谈，你怎么看"）") }
+                supportingText = { Text("出现在句首时唤醒 AI（如「小谈，你怎么看」）") }
             )
             Button(
                 onClick = vm::save,

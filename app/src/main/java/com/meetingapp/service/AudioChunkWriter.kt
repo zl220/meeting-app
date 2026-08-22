@@ -30,7 +30,7 @@ class AudioChunkWriter(private val outputDir: File) {
 
     fun flushChunk(): ChunkFile? {
         if (buffer.isEmpty()) return null
-        val file = writeWav(buffer.flatten().toByteArray())
+        val file = writeWav(buffer.flattenToBytes())
         val startMs = chunkStartMs
         val endMs = System.currentTimeMillis()
         buffer.clear()
@@ -80,7 +80,7 @@ class AudioChunkWriter(private val outputDir: File) {
 
 data class ChunkFile(val file: File, val startMs: Long, val endMs: Long)
 
-private fun List<ByteArray>.flatten(): ByteArray {
+private fun List<ByteArray>.flattenToBytes(): ByteArray {
     val total = sumOf { it.size }
     val result = ByteArray(total)
     var offset = 0

@@ -1,5 +1,6 @@
 package com.meetingapp.ui.screen
 
+import android.Manifest
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
@@ -19,25 +20,48 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.google.accompanist.permissions.isGranted
+import com.google.accompanist.permissions.rememberPermissionState
 import com.meetingapp.data.db.entity.Segment
 import com.meetingapp.viewmodel.ActiveMeetingViewModel
 import com.meetingapp.viewmodel.AiState
 import kotlin.math.roundToInt
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalPermissionsApi::class)
 @Composable
 fun ActiveMeetingScreen(
     meetingId: Long,
     onFinished: () -> Unit,
     vm: ActiveMeetingViewModel = hiltViewModel()
 ) {
+    val micPermission = rememberPermissionState(Manifest.permission.RECORD_AUDIO)
     val state by vm.uiState.collectAsState()
     val segments by vm.segments.collectAsState()
     val listState = rememberLazyListState()
 
     LaunchedEffect(meetingId) {
         vm.load(meetingId)
-        vm.startMeeting()
+    }
+
+    LaunchedEffect(micPermission.status.isGranted) {
+        if (micPermission.status.isGranted) {
+            vm.startMeeting()
+        } else {
+            micPermission.launchPermissionRequest()
+        }
+    }
+
+    if (!micPermission.status.isGranted) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text("需要麦克风权限才能录音")
+                Button(onClick = { micPermission.launchPermissionRequest() }) {
+                    Text("授权麦克风")
+                }
+            }
+        }
+        return
     }
 
     LaunchedEffect(segments.size) {

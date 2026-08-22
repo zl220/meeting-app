@@ -71,15 +71,24 @@ class RecordingService : Service() {
             Constants.SAMPLE_RATE_HZ,
             Constants.CHANNEL_CONFIG,
             Constants.AUDIO_FORMAT
-        ).coerceAtLeast(4096)
+        ).coerceAtLeast(8192)
 
-        audioRecord = AudioRecord(
+        val record = AudioRecord(
             MediaRecorder.AudioSource.MIC,
             Constants.SAMPLE_RATE_HZ,
             Constants.CHANNEL_CONFIG,
             Constants.AUDIO_FORMAT,
             bufferSize
         )
+
+        if (record.state != AudioRecord.STATE_INITIALIZED) {
+            record.release()
+            releaseWakeLock()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
+            return
+        }
+        audioRecord = record
 
         val audioDir = File(filesDir, "audio/$meetingId").also { it.mkdirs() }
         chunkWriter = AudioChunkWriter(audioDir).also { it.start() }

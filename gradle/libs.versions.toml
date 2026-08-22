@@ -13,7 +13,7 @@ okhttp = "4.12.0"
 coroutines = "1.9.0"
 datastore = "1.1.1"
 work = "2.9.1"
-accompanist = "0.36.0"
+accompanist = "0.34.0"
 coil = "2.7.0"
 core-ktx = "1.13.1"
 google-api-services-drive = "v3-rev197-1.25.0"
@@ -72,6 +72,9 @@ play-services-auth = { group = "com.google.android.gms", name = "play-services-a
 
 # Coil
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
+
+# Accompanist
+accompanist-permissions = { group = "com.google.accompanist", name = "accompanist-permissions", version.ref = "accompanist" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

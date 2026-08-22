@@ -25,6 +25,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
@@ -52,13 +56,20 @@ class ActiveMeetingViewModel @Inject constructor(
 ) : ViewModel() {
 
     val uiState = MutableStateFlow(ActiveMeetingUiState())
+
+    private val _meetingId = MutableStateFlow(-1L)
     private var meetingId: Long = -1
+
+    // Stable flow: survives load() calls without recreating collectAsState()
+    val segments: StateFlow<List<Segment>> = _meetingId
+        .flatMapLatest { id ->
+            if (id < 0) flowOf(emptyList()) else transcriptionRepo.getSegments(id)
+        }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
     private var timerJob: Job? = null
     private var recordingService: RecordingService? = null
     private var aiJob: Job? = null
-
-    val segments: StateFlow<List<Segment>> get() = _segments
-    private var _segments: StateFlow<List<Segment>> = MutableStateFlow(emptyList())
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
@@ -72,12 +83,24 @@ class ActiveMeetingViewModel @Inject constructor(
 
     fun load(id: Long) {
         meetingId = id
-        _segments = transcriptionRepo.getSegments(id)
-            .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        _meetingId.value = id
         viewModelScope.launch {
             val meeting = meetingRepo.getById(id) ?: return@launch
             val participants = meetingRepo.getParticipants(id)
             uiState.update { it.copy(meeting = meeting, participants = participants) }
+        }
+        // Wake-word detection: watch newest non-AI segment text
+        viewModelScope.launch {
+            segments
+                .map { it.lastOrNull { seg -> !seg.isAi }?.text }
+                .distinctUntilChanged()
+                .collect { latestText ->
+                    if (latestText == null) return@collect
+                    val result = WakeWordDetector.detect(latestText) ?: return@collect
+                    if (uiState.value.aiState == AiState.IDLE) {
+                        askAi(result.query)
+                    }
+                }
         }
     }
 
@@ -102,15 +125,20 @@ class ActiveMeetingViewModel @Inject constructor(
         try { context.unbindService(serviceConnection) } catch (_: Exception) {}
     }
 
+    fun assignSpeakerName(label: String, name: String) {
+        viewModelScope.launch {
+            transcriptionRepo.assignSpeakerName(meetingId, label, name)
+        }
+    }
+
     fun askAi(question: String, rolePrompt: String? = null) {
         if (uiState.value.aiState != AiState.IDLE) return
-        // Flush current audio buffer before AI responds to include latest speech
         viewModelScope.launch {
             recordingService?.flushCurrentChunk()?.let { processChunk(it) }
         }
         uiState.update { it.copy(aiState = AiState.THINKING, pendingAiQuery = question) }
         aiJob = viewModelScope.launch {
-            delay(2500) // grace window to cancel mis-trigger
+            delay(2500)
             if (uiState.value.aiState != AiState.THINKING) return@launch
             runAiResponse(question, rolePrompt)
         }
@@ -130,15 +158,13 @@ class ActiveMeetingViewModel @Inject constructor(
         val state = uiState.value
         val meeting = state.meeting ?: return
         val names = state.participants.map { it.name }
-        val context = buildContext()
-        val elapsed = state.elapsedMs / 60_000
-        val total = meeting.estimatedDurationMinutes.toLong()
-        val remaining = (total - elapsed).coerceAtLeast(0).toInt()
+        val remaining = ((meeting.estimatedDurationMinutes * 60_000L - state.elapsedMs)
+            .coerceAtLeast(0) / 60_000).toInt()
 
         val response = try {
             askAiApi.ask(
                 AiRequest(
-                    meetingContext = context,
+                    meetingContext = buildContext(),
                     question = question,
                     rolePrompt = rolePrompt,
                     participantNames = names,
@@ -162,20 +188,26 @@ class ActiveMeetingViewModel @Inject constructor(
             )
         )
         uiState.update { it.copy(aiState = AiState.SPEAKING, lastAiSegmentId = segId) }
-
-        try {
-            ttsPlayer.speak(response)
-        } catch (_: Exception) {}
-
+        try { ttsPlayer.speak(response) } catch (_: Exception) {}
         uiState.update { it.copy(aiState = AiState.IDLE, pendingAiQuery = null, lastAiSegmentId = null) }
     }
 
-    private fun buildContext(): String {
-        val segs = (_segments as? StateFlow<List<Segment>>)?.value ?: emptyList()
-        return segs.takeLast(60).joinToString("\n") { seg ->
+    private fun buildContext(): String =
+        segments.value.takeLast(60).joinToString("\n") { seg ->
             val name = if (seg.isAi) "AI" else (seg.speakerName ?: seg.speakerLabel)
             "$name：${seg.text}"
         }
+
+    private suspend fun processChunk(chunk: ChunkFile) {
+        val state = uiState.value
+        val meeting = state.meeting ?: return
+        transcriptionRepo.processChunk(
+            meetingId = meetingId,
+            chunk = chunk,
+            keywords = state.participants.map { it.name },
+            prompt = meeting.agenda ?: meeting.title,
+            languages = listOf("zh")
+        )
     }
 
     private fun startTimer() {
@@ -186,20 +218,6 @@ class ActiveMeetingViewModel @Inject constructor(
                 uiState.update { it.copy(elapsedMs = System.currentTimeMillis() - startMs) }
             }
         }
-    }
-
-    private suspend fun processChunk(chunk: ChunkFile) {
-        val state = uiState.value
-        val meeting = state.meeting ?: return
-        val keywords = state.participants.map { it.name }
-        val prompt = meeting.agenda ?: meeting.title
-        transcriptionRepo.processChunk(
-            meetingId = meetingId,
-            chunk = chunk,
-            keywords = keywords,
-            prompt = prompt,
-            languages = listOf("zh")
-        )
     }
 
     fun checkWakeWord(text: String): WakeWordDetector.WakeResult? =

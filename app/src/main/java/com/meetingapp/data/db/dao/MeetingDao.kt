@@ -25,6 +25,9 @@ interface MeetingDao {
     @Query("UPDATE meetings SET status = :status, endedAt = :endedAt WHERE id = :id")
     suspend fun setFinished(id: Long, status: MeetingStatus = MeetingStatus.FINISHED, endedAt: Long)
 
+    @Query("UPDATE meetings SET audioFilePath = :path WHERE id = :id")
+    suspend fun setAudioFilePath(id: Long, path: String?)
+
     @Delete
     suspend fun delete(meeting: Meeting)
 

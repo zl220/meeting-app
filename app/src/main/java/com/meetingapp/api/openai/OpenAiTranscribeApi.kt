@@ -80,7 +80,7 @@ class OpenAiTranscribeApi @Inject constructor(
                     meetingId = meetingId,
                     startMs = chunkStartMs + (apiSegments.first().start * 1000).toLong(),
                     endMs = chunkStartMs + (apiSegments.last().end * 1000).toLong(),
-                    speakerLabel = "Speaker 1",
+                    speakerLabel = Constants.SPEAKER_LABEL_DEFAULT,
                     text = fullText
                 )
             )

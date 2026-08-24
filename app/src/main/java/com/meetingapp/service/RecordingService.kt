@@ -35,6 +35,8 @@ class RecordingService : Service() {
     private var audioRecord: AudioRecord? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var chunkWriter: AudioChunkWriter? = null
+    private var fullAudioRecorder: FullAudioRecorder? = null
+    private var fullAudioFile: File? = null
     private var meetingId: Long = -1
 
     private val _isRecording = MutableStateFlow(false)
@@ -99,6 +101,14 @@ class RecordingService : Service() {
 
         val audioDir = File(filesDir, "audio/$meetingId").also { it.mkdirs() }
         chunkWriter = AudioChunkWriter(audioDir).also { it.start() }
+        // Full continuous recording of the whole meeting (keeps silence).
+        fullAudioFile = File(audioDir, "meeting_$meetingId.m4a")
+        fullAudioRecorder = try {
+            FullAudioRecorder(fullAudioFile!!).also { it.start() }
+        } catch (_: Exception) {
+            fullAudioFile = null
+            null   // full-file recording is best-effort; chunk transcription still works
+        }
 
         audioRecord!!.startRecording()
         _isRecording.value = true
@@ -124,6 +134,7 @@ class RecordingService : Service() {
                     val writer = chunkWriter ?: break
                     val slice = readBuffer.copyOf(read)
                     writer.write(slice)
+                    fullAudioRecorder?.write(slice)
                     // Update amplitude for waveform animation — boosted for visibility
                     _amplitude.value = (computeRms(slice) * 8f).coerceIn(0f, 1f)
                     if (writer.isChunkReady()) {
@@ -144,11 +155,19 @@ class RecordingService : Service() {
         audioRecord = null
         val finalChunk = chunkWriter?.flushChunk()
         chunkWriter = null
+        // Detach first so the read loop can't write to it while we finalize.
+        val fullRecorder = fullAudioRecorder
+        fullAudioRecorder = null
+        fullRecorder?.stop()
         releaseWakeLock()
         stopForeground(STOP_FOREGROUND_REMOVE)
         stopSelf()
         return finalChunk
     }
+
+    /** Path of the full meeting recording, valid after [stopRecording]. Null if unavailable. */
+    fun fullAudioFilePath(): String? =
+        fullAudioFile?.takeIf { it.exists() && it.length() > 0 }?.absolutePath
 
     fun flushCurrentChunk(): ChunkFile? = chunkWriter?.flushChunk()
 

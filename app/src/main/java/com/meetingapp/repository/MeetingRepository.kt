@@ -26,6 +26,8 @@ class MeetingRepository @Inject constructor(
 
     suspend fun setFinished(id: Long) = dao.setFinished(id, endedAt = System.currentTimeMillis())
 
+    suspend fun setAudioFilePath(id: Long, path: String?) = dao.setAudioFilePath(id, path)
+
     suspend fun setParticipants(meetingId: Long, participantIds: List<Long>) {
         dao.clearParticipantLinks(meetingId)
         participantIds.forEach { pid ->

@@ -90,17 +90,39 @@ fun MinutesReviewScreen(
                 HorizontalDivider(Modifier.padding(horizontal = 16.dp))
             }
 
-            // Minutes content editor
+            // Minutes content — toggle between rendered preview and editable source
+            var editing by remember { mutableStateOf(false) }
             Column(Modifier.padding(horizontal = 16.dp)) {
-                Text("纪要内容", style = MaterialTheme.typography.titleMedium)
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("纪要内容", style = MaterialTheme.typography.titleMedium)
+                    TextButton(onClick = { editing = !editing }, enabled = state.minutes != null) {
+                        Text(if (editing) "预览" else "编辑")
+                    }
+                }
                 Spacer(Modifier.height(8.dp))
-                OutlinedTextField(
-                    value = state.editedContent,
-                    onValueChange = vm::updateContent,
-                    modifier = Modifier.fillMaxWidth().heightIn(min = 300.dp),
-                    enabled = state.minutes != null,
-                    placeholder = { Text("纪要将在此显示…") }
-                )
+                if (editing) {
+                    OutlinedTextField(
+                        value = state.editedContent,
+                        onValueChange = vm::updateContent,
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 300.dp),
+                        enabled = state.minutes != null,
+                        placeholder = { Text("纪要将在此显示…") }
+                    )
+                } else if (state.editedContent.isBlank()) {
+                    Text("纪要将在此显示…", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                } else {
+                    dev.jeziellago.compose.markdowntext.MarkdownText(
+                        markdown = state.editedContent,
+                        modifier = Modifier.fillMaxWidth(),
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    )
+                }
             }
 
             // Action buttons row

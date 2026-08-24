@@ -23,6 +23,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.Person
@@ -100,7 +101,15 @@ fun ActiveMeetingScreen(
             TopAppBar(
                 title = { Text(meeting?.title ?: "会议进行中", maxLines = 1) },
                 actions = {
-                    TimerText(elapsedSec, isOvertime, isWarning)
+                    IconButton(onClick = { vm.openMinutesPreview() }) {
+                        Icon(Icons.Default.Description, contentDescription = "预览会议纪要")
+                    }
+                    MeetingTimeDisplay(
+                        elapsedMs = state.elapsedMs,
+                        totalSec = totalSec,
+                        isOvertime = isOvertime,
+                        isWarning = isWarning
+                    )
                     Spacer(Modifier.width(12.dp))
                 }
             )
@@ -117,6 +126,18 @@ fun ActiveMeetingScreen(
                     else -> MaterialTheme.colorScheme.primary
                 }
             )
+
+            // Warn loudly if no API key — transcription, AI and minutes all silently fail otherwise.
+            if (state.apiKeyMissing) {
+                Surface(color = MaterialTheme.colorScheme.errorContainer, modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        "⚠️ 未设置 OpenAI API Key，无法转写、AI 问答和生成纪要。请到「设置」填写后重新开始会议。",
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
 
             // Waveform bar — always visible while recording
             WaveformBar(amplitude = amplitude)
@@ -188,6 +209,42 @@ fun ActiveMeetingScreen(
             onDismiss = { assigningLabel = null }
         )
     }
+
+    if (state.previewOpen) {
+        MinutesPreviewDialog(
+            content = state.previewContent,
+            onDismiss = { vm.closeMinutesPreview() }
+        )
+    }
+}
+
+// ── Minutes preview dialog ──────────────────────────────────────────────────
+
+@Composable
+private fun MinutesPreviewDialog(content: String?, onDismiss: () -> Unit) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = { Icon(Icons.Default.Description, null) },
+        title = { Text("当前会议纪要") },
+        text = {
+            if (content == null) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp)
+                    Text("正在整理最新纪要…", style = MaterialTheme.typography.bodyMedium)
+                }
+            } else {
+                Column(Modifier.verticalScroll(rememberScrollState())) {
+                    dev.jeziellago.compose.markdowntext.MarkdownText(
+                        markdown = content,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    )
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("关闭") } }
+    )
 }
 
 // ── Waveform animation ──────────────────────────────────────────────────────
@@ -240,17 +297,51 @@ private fun WaveformBar(amplitude: Float) {
 
 // ── Timer ───────────────────────────────────────────────────────────────────
 
+/** Formats a second count as H:MM:SS (or MM:SS when under an hour). */
+private fun formatDuration(totalSec: Long): String {
+    val h = totalSec / 3600
+    val m = (totalSec % 3600) / 60
+    val s = totalSec % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%02d:%02d".format(m, s)
+}
+
+/**
+ * Top-bar time display: "已用 / 总时长" on top, wall clock below.
+ * The clock re-derives from the system time on each elapsedMs tick (updates ~1/s).
+ */
 @Composable
-private fun TimerText(elapsedSec: Long, isOvertime: Boolean, isWarning: Boolean) {
-    val h = elapsedSec / 3600
-    val m = (elapsedSec % 3600) / 60
-    val s = elapsedSec % 60
-    val text = if (h > 0) "%d:%02d:%02d".format(h, m, s) else "%02d:%02d".format(m, s)
-    Text(
-        text,
-        color = when { isOvertime -> MaterialTheme.colorScheme.error; isWarning -> Color(0xFFFFA000); else -> MaterialTheme.colorScheme.onSurface },
-        fontWeight = FontWeight.Medium, fontSize = 16.sp
-    )
+private fun MeetingTimeDisplay(elapsedMs: Long, totalSec: Long, isOvertime: Boolean, isWarning: Boolean) {
+    val elapsedSec = elapsedMs / 1000
+    val elapsedColor = when {
+        isOvertime -> MaterialTheme.colorScheme.error
+        isWarning -> Color(0xFFFFA000)
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    // Recomputed whenever elapsedMs changes (the VM ticks it every second).
+    val clock = remember(elapsedSec) {
+        java.text.SimpleDateFormat("HH:mm", java.util.Locale.getDefault())
+            .format(java.util.Date())
+    }
+    Column(horizontalAlignment = Alignment.End) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                formatDuration(elapsedSec),
+                color = elapsedColor,
+                fontWeight = FontWeight.Medium,
+                fontSize = 15.sp
+            )
+            Text(
+                " / ${formatDuration(totalSec)}",
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                fontSize = 13.sp
+            )
+        }
+        Text(
+            "⏰ $clock",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontSize = 11.sp
+        )
+    }
 }
 
 // ── Idle card ───────────────────────────────────────────────────────────────
@@ -344,9 +435,14 @@ private fun SpeakerAssignDialog(label: String, participants: List<Participant>, 
     AlertDialog(
         onDismissRequest = onDismiss,
         icon = { Icon(Icons.Default.Person, null) },
-        title = { Text("认领发言人：$label") },
+        title = { Text("标注发言人") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    "当前无法自动区分说话人，指定的姓名会应用到所有「发言」片段。",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 if (participants.isNotEmpty()) {
                     Text("从参会者中选择", style = MaterialTheme.typography.labelMedium)
                     participants.forEach { p -> OutlinedButton(onClick = { onAssign(p.name) }, modifier = Modifier.fillMaxWidth()) { Text(p.name) } }
@@ -387,7 +483,6 @@ private fun AiControlPanel(
     onPauseMic: () -> Unit,
     onResumeMic: () -> Unit
 ) {
-    val roles = listOf("财务" to "财务风险", "风险" to "潜在风险", "用户" to "用户视角", "法务" to "法律合规")
     val context = LocalContext.current
     var pttState by remember { mutableStateOf(PttState.IDLE) }
     var recognizedText by remember { mutableStateOf("") }
@@ -398,14 +493,6 @@ private fun AiControlPanel(
     DisposableEffect(Unit) { onDispose { recognizer?.destroy() } }
 
     Column(Modifier.padding(start = 12.dp, end = 12.dp, top = 4.dp, bottom = 2.dp)) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            roles.forEach { (label, role) ->
-                FilterChip(selected = false, onClick = { if (enabled) onAskAi("请从${role}角度发表你的看法", role) },
-                    label = { Text(label, fontSize = 12.sp) }, enabled = enabled)
-            }
-        }
-        Spacer(Modifier.height(6.dp))
-
         val pttColor = when {
             !enabled -> MaterialTheme.colorScheme.surfaceVariant
             pttState == PttState.LISTENING -> MaterialTheme.colorScheme.primary

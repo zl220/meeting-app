@@ -11,6 +11,16 @@ object Constants {
     const val AI_WAKE_NAME = "小谈"
     const val AUDIO_RETENTION_DAYS = 30
 
+    // whisper-1 does NOT do speaker diarization, so every transcribed chunk gets this
+    // single neutral label. Users can tap a segment to manually assign a real name.
+    const val SPEAKER_LABEL_DEFAULT = "发言"
+
+    // Live rolling minutes (R10): refresh the draft once this many new transcript
+    // chars accumulate (~400 zh chars ≈ 2 min of meeting speech), throttled by a
+    // minimum interval so fast talkers don't trigger back-to-back API calls.
+    const val MINUTES_REFRESH_CHARS = 400
+    const val MINUTES_REFRESH_MIN_INTERVAL_MS = 45_000L
+
     const val NOTIF_CHANNEL_RECORDING = "recording_channel"
     const val NOTIF_ID_RECORDING = 1001
 

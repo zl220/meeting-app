@@ -99,6 +99,9 @@ dependencies {
     // Coil
     implementation(libs.coil.compose)
 
+    // Markdown rendering
+    implementation(libs.compose.markdown)
+
     // Accompanist
     implementation(libs.accompanist.permissions)
 }

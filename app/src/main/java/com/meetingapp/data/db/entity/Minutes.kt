@@ -20,6 +20,8 @@ data class Minutes(
     val meetingId: Long,
     val generatedAt: Long = System.currentTimeMillis(),
     val content: String,
+    /** True while the meeting is live and this is the rolling draft; false once finalized (R10). */
+    val isDraft: Boolean = false,
     val isEdited: Boolean = false,
     val savedToDrive: Boolean = false,
     val emailSent: Boolean = false

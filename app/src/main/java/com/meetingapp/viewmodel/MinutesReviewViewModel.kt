@@ -65,9 +65,19 @@ class MinutesReviewViewModel @Inject constructor(
     }
 
     private suspend fun generateMinutes(meeting: Meeting, segments: List<Segment>) {
+        // Already finalized (e.g. re-opening a finished meeting): show it, don't regenerate.
+        val existing = minutesRepo.getFinalized(meeting.id)
+        if (existing != null) {
+            uiState.update {
+                it.copy(isGenerating = false, minutes = existing, editedContent = existing.content)
+            }
+            return
+        }
+
         uiState.update { it.copy(isGenerating = true, error = null) }
         val minutes = try {
-            minutesRepo.generate(meeting, segments)
+            // T3 (R10): first finalize — regenerate from the full transcript, clear the draft.
+            minutesRepo.finalize(meeting, segments)
         } catch (e: Exception) {
             uiState.update { it.copy(isGenerating = false, error = "生成失败：${e.message}") }
             return

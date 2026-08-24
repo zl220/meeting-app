@@ -14,5 +14,7 @@ data class Meeting(
     val estimatedDurationMinutes: Int,
     val startedAt: Long? = null,
     val endedAt: Long? = null,
-    val status: MeetingStatus = MeetingStatus.IDLE
+    val status: MeetingStatus = MeetingStatus.IDLE,
+    /** Absolute path to the full continuous meeting recording (M4A/AAC), set when the meeting ends. */
+    val audioFilePath: String? = null
 )

@@ -8,7 +8,7 @@ import com.meetingapp.data.db.entity.*
 @Database(
     entities = [Participant::class, Meeting::class, MeetingParticipant::class,
         Segment::class, Minutes::class, AudioChunk::class],
-    version = 1,
+    version = 3,
     exportSchema = false
 )
 abstract class MeetingDatabase : RoomDatabase() {

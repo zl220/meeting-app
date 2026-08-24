@@ -15,6 +15,7 @@ datastore = "1.1.1"
 work = "2.9.1"
 accompanist = "0.34.0"
 coil = "2.7.0"
+compose-markdown = "0.5.7"
 core-ktx = "1.13.1"
 google-api-services-drive = "v3-rev197-1.25.0"
 google-api-client-android = "1.34.1"
@@ -72,6 +73,9 @@ play-services-auth = { group = "com.google.android.gms", name = "play-services-a
 
 # Coil
 coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
+
+# Markdown rendering (Compose)
+compose-markdown = { group = "com.github.jeziellago", name = "compose-markdown", version.ref = "compose-markdown" }
 
 # Accompanist
 accompanist-permissions = { group = "com.google.accompanist", name = "accompanist-permissions", version.ref = "accompanist" }

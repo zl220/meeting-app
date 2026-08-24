@@ -40,6 +40,11 @@ class RecordingService : Service() {
     private val _isRecording = MutableStateFlow(false)
     val isRecording: StateFlow<Boolean> = _isRecording
 
+    private val _amplitude = MutableStateFlow(0f)
+    val amplitude: StateFlow<Float> = _amplitude
+
+    @Volatile private var audioPaused = false
+
     interface ChunkCallback {
         suspend fun onChunkReady(meetingId: Long, chunk: ChunkFile)
     }
@@ -55,7 +60,11 @@ class RecordingService : Service() {
         when (intent?.action) {
             ACTION_START -> {
                 meetingId = intent.getLongExtra(EXTRA_MEETING_ID, -1)
-                startRecording()
+                // Must promote to foreground immediately to avoid ANR/kill on Android 12+.
+                // Actual audio recording is started by the bound client via startRecording()
+                // from onServiceConnected — avoids double-start race.
+                startForeground(Constants.NOTIF_ID_RECORDING, buildNotification())
+                acquireWakeLock()
             }
             ACTION_STOP -> stopRecording()
         }
@@ -64,8 +73,6 @@ class RecordingService : Service() {
 
     fun startRecording() {
         if (_isRecording.value) return
-        startForeground(Constants.NOTIF_ID_RECORDING, buildNotification())
-        acquireWakeLock()
 
         val bufferSize = AudioRecord.getMinBufferSize(
             Constants.SAMPLE_RATE_HZ,
@@ -96,20 +103,37 @@ class RecordingService : Service() {
         audioRecord!!.startRecording()
         _isRecording.value = true
 
+        // Separate coroutine for chunk processing so it never blocks the read loop
+        val chunkChannel = kotlinx.coroutines.channels.Channel<ChunkFile>(capacity = 8)
+        scope.launch {
+            for (chunk in chunkChannel) {
+                chunkCallback.onChunkReady(meetingId, chunk)
+            }
+        }
+
         scope.launch {
             val readBuffer = ByteArray(bufferSize)
             while (_isRecording.value) {
+                if (audioPaused) {
+                    kotlinx.coroutines.delay(50)
+                    _amplitude.value = 0f
+                    continue
+                }
                 val read = audioRecord?.read(readBuffer, 0, bufferSize) ?: break
                 if (read > 0) {
                     val writer = chunkWriter ?: break
-                    writer.write(readBuffer.copyOf(read))
+                    val slice = readBuffer.copyOf(read)
+                    writer.write(slice)
+                    // Update amplitude for waveform animation — boosted for visibility
+                    _amplitude.value = (computeRms(slice) * 8f).coerceIn(0f, 1f)
                     if (writer.isChunkReady()) {
                         writer.flushChunk()?.let { chunk ->
-                            chunkCallback.onChunkReady(meetingId, chunk)
+                            chunkChannel.trySend(chunk)
                         }
                     }
                 }
             }
+            chunkChannel.close()
         }
     }
 
@@ -127,6 +151,31 @@ class RecordingService : Service() {
     }
 
     fun flushCurrentChunk(): ChunkFile? = chunkWriter?.flushChunk()
+
+    /** Temporarily release the microphone so SpeechRecognizer can use it. */
+    fun pauseForSpeechRecognizer() {
+        audioPaused = true
+        audioRecord?.stop()
+    }
+
+    /** Resume recording after SpeechRecognizer or TTS is done. */
+    fun resumeAfterSpeechRecognizer() {
+        if (!audioPaused) return
+        audioPaused = false
+        audioRecord?.startRecording()
+    }
+
+    private fun computeRms(pcm: ByteArray): Float {
+        if (pcm.size < 2) return 0f
+        var sumSq = 0.0
+        var i = 0
+        while (i + 1 < pcm.size) {
+            val sample = (pcm[i].toInt() and 0xFF) or (pcm[i + 1].toInt() shl 8)
+            sumSq += sample * sample.toDouble()
+            i += 2
+        }
+        return (Math.sqrt(sumSq / (pcm.size / 2)) / 32768.0).toFloat().coerceIn(0f, 1f)
+    }
 
     private fun buildNotification(): Notification =
         NotificationCompat.Builder(this, Constants.NOTIF_CHANNEL_RECORDING)

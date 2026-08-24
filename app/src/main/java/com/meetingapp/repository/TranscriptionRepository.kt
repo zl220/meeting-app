@@ -44,11 +44,26 @@ class TranscriptionRepository @Inject constructor(
                 prompt = prompt,
                 languages = languages
             )
-            segments.forEach { segmentDao.insert(it) }
+            val filtered = segments.filter { !isWhisperHallucination(it.text) }
+            Log.d("TranscriptionRepo", "Transcribed ${filtered.size}/${segments.size} segment(s) from ${chunk.file.name}")
+            filtered.forEach { segmentDao.insert(it) }
             chunkDao.markTranscribed(chunkId)
         } catch (e: Exception) {
-            Log.e("TranscriptionRepo", "transcribe failed: ${e.message}")
+            Log.e("TranscriptionRepo", "transcribe failed for ${chunk.file.name}", e)
         }
+    }
+
+    private fun isWhisperHallucination(text: String): Boolean {
+        val t = text.trim()
+        if (t.isBlank()) return true
+        // Known Whisper hallucination patterns on silence/noise
+        val hallucinations = listOf(
+            "请不吝点赞", "订阅", "转发", "打赏",
+            "thank you for watching", "thanks for watching",
+            "please subscribe", "字幕由", "翻译",
+            "MBC", "KBS", "字幕组"
+        )
+        return hallucinations.any { t.contains(it, ignoreCase = true) }
     }
 
     suspend fun insertAiSegment(segment: Segment) = segmentDao.insert(segment)

@@ -1,5 +1,6 @@
 package com.meetingapp.api.openai
 
+import android.util.Log
 import com.meetingapp.api.TranscribeApi
 import com.meetingapp.data.db.entity.Segment
 import com.meetingapp.util.Constants
@@ -32,23 +33,34 @@ class OpenAiTranscribeApi @Inject constructor(
         )
         val modelBody = Constants.MODEL_TRANSCRIBE.toRequestBody("text/plain".toMediaTypeOrNull())
         val formatBody = "verbose_json".toRequestBody("text/plain".toMediaTypeOrNull())
-        val langBody = languages.firstOrNull().orEmpty().toRequestBody("text/plain".toMediaTypeOrNull())
-        val promptBody = prompt.takeIf { it.isNotBlank() }?.toRequestBody("text/plain".toMediaTypeOrNull())
-        val keywordsBody = keywords.takeIf { it.isNotEmpty() }
-            ?.joinToString(",")
+
+        // Only pass language if non-blank; empty string causes API 400
+        val langBody = languages.firstOrNull()
+            ?.takeIf { it.isNotBlank() }
             ?.toRequestBody("text/plain".toMediaTypeOrNull())
 
+        // Merge keywords into the prompt so Whisper knows the vocabulary
+        val fullPrompt = buildString {
+            if (prompt.isNotBlank()) append(prompt)
+            if (keywords.isNotEmpty()) {
+                if (isNotEmpty()) append("。")
+                append(keywords.joinToString("、"))
+            }
+        }.takeIf { it.isNotBlank() }?.toRequestBody("text/plain".toMediaTypeOrNull())
+
         val apiKey = apiKeyFlow.first()
+        Log.d("TranscribeApi", "Transcribing ${audioFile.name} (${audioFile.length()} bytes), model=${Constants.MODEL_TRANSCRIBE}")
+
         val response = service.transcribe(
             auth = "Bearer $apiKey",
             file = filePart,
             model = modelBody,
             responseFormat = formatBody,
             language = langBody,
-            prompt = promptBody,
-            keywords = keywordsBody
+            prompt = fullPrompt
         )
 
+        Log.d("TranscribeApi", "Got response: text=${response.text.take(80)}, segments=${response.segments?.size}")
         return mapResponseToSegments(response, meetingId, chunkStartMs)
     }
 
@@ -59,24 +71,30 @@ class OpenAiTranscribeApi @Inject constructor(
     ): List<Segment> {
         val apiSegments = response.segments
         if (!apiSegments.isNullOrEmpty()) {
-            return apiSegments.map { seg ->
+            // whisper-1 verbose_json: merge all sub-segments into one per chunk
+            // (no speaker diarization from whisper-1; use a single label per chunk)
+            val fullText = apiSegments.joinToString(" ") { it.text.trim() }.trim()
+            if (fullText.isBlank()) return emptyList()
+            return listOf(
                 Segment(
                     meetingId = meetingId,
-                    startMs = chunkStartMs + (seg.start * 1000).toLong(),
-                    endMs = chunkStartMs + (seg.end * 1000).toLong(),
-                    speakerLabel = seg.speaker ?: "Speaker 1",
-                    text = seg.text.trim()
+                    startMs = chunkStartMs + (apiSegments.first().start * 1000).toLong(),
+                    endMs = chunkStartMs + (apiSegments.last().end * 1000).toLong(),
+                    speakerLabel = "Speaker 1",
+                    text = fullText
                 )
-            }
+            )
         }
-        // Fallback: single segment if API returns only text
+        // Fallback: API returned only top-level text
+        val text = response.text.trim()
+        if (text.isBlank()) return emptyList()
         return listOf(
             Segment(
                 meetingId = meetingId,
                 startMs = chunkStartMs,
                 endMs = chunkStartMs + Constants.CHUNK_DURATION_MS,
                 speakerLabel = "Speaker 1",
-                text = response.text.trim()
+                text = text
             )
         )
     }

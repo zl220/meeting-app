@@ -1,26 +1,19 @@
 package com.meetingapp.service
 
-import com.meetingapp.util.Constants
-
 object WakeWordDetector {
-
-    private val wakePattern: Regex by lazy {
-        // Matches: wake-name at sentence start, followed by pause/comma, then question/imperative
-        // Examples: "小谈，你怎么看" / "小谈 请问" / "小谈你觉得"
-        val name = Regex.escape(Constants.AI_WAKE_NAME)
-        Regex("""(?:^|[。？！\n])$name[，,\s]*(.+)""")
-    }
 
     data class WakeResult(val query: String)
 
-    fun detect(text: String): WakeResult? {
+    fun detect(text: String, wakeName: String): WakeResult? {
+        if (wakeName.isBlank()) return null
         val trimmed = text.trim()
-        val match = wakePattern.find(trimmed) ?: return null
+        val escaped = Regex.escape(wakeName)
+        // Match wake name anywhere in the text, followed by optional pause then the query.
+        // E.g. "小娇，你来讲几句" / "小娇你能发表一下看法" / "好的小娇，请问..."
+        val pattern = Regex("""$escaped[，,、\s]*(.{2,})""")
+        val match = pattern.find(trimmed) ?: return null
         val query = match.groupValues[1].trim()
         if (query.isBlank()) return null
         return WakeResult(query)
     }
-
-    fun stripWakeWord(text: String): String =
-        text.trim().removePrefix(Constants.AI_WAKE_NAME).trimStart('，', ',', ' ', '\t')
 }

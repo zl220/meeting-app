@@ -14,6 +14,7 @@ import com.meetingapp.data.db.entity.Meeting
 import com.meetingapp.data.db.entity.Participant
 import com.meetingapp.data.db.entity.Segment
 import com.meetingapp.repository.MeetingRepository
+import com.meetingapp.repository.SettingsRepository
 import com.meetingapp.repository.TranscriptionRepository
 import com.meetingapp.service.ChunkFile
 import com.meetingapp.service.RecordingService
@@ -25,7 +26,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
@@ -51,6 +54,7 @@ class ActiveMeetingViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val meetingRepo: MeetingRepository,
     private val transcriptionRepo: TranscriptionRepository,
+    private val settingsRepo: SettingsRepository,
     private val askAiApi: AskAiApi,
     private val ttsPlayer: OpenAiTtsPlayer
 ) : ViewModel() {
@@ -70,14 +74,24 @@ class ActiveMeetingViewModel @Inject constructor(
     private var timerJob: Job? = null
     private var recordingService: RecordingService? = null
     private var aiJob: Job? = null
+    private var amplitudeJob: Job? = null
+
+    private val _amplitude = MutableStateFlow(0f)
+    val amplitude: StateFlow<Float> = _amplitude.asStateFlow()
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
             recordingService = (binder as RecordingService.RecordingBinder).getService()
             recordingService?.startRecording()
+            // Forward amplitude from service to ViewModel
+            amplitudeJob = viewModelScope.launch {
+                recordingService?.amplitude?.collect { _amplitude.value = it }
+            }
         }
         override fun onServiceDisconnected(name: ComponentName) {
             recordingService = null
+            amplitudeJob?.cancel()
+            _amplitude.value = 0f
         }
     }
 
@@ -96,7 +110,8 @@ class ActiveMeetingViewModel @Inject constructor(
                 .distinctUntilChanged()
                 .collect { latestText ->
                     if (latestText == null) return@collect
-                    val result = WakeWordDetector.detect(latestText) ?: return@collect
+                    val wakeName = settingsRepo.aiWakeName.first()
+                    val result = WakeWordDetector.detect(latestText, wakeName) ?: return@collect
                     if (uiState.value.aiState == AiState.IDLE) {
                         askAi(result.query)
                     }
@@ -115,15 +130,17 @@ class ActiveMeetingViewModel @Inject constructor(
         startTimer()
     }
 
-    fun stopMeeting() {
+    // Returns only after DB is updated so the caller can navigate immediately.
+    suspend fun stopMeetingAndFinish() {
         timerJob?.cancel()
         val finalChunk = recordingService?.stopRecording()
-        viewModelScope.launch {
-            finalChunk?.let { processChunk(it) }
-            meetingRepo.setFinished(meetingId)
-        }
         try { context.unbindService(serviceConnection) } catch (_: Exception) {}
+        finalChunk?.let { processChunk(it) }
+        meetingRepo.setFinished(meetingId)
     }
+
+    fun pauseMicForPtt() = recordingService?.pauseForSpeechRecognizer()
+    fun resumeMicAfterPtt() = recordingService?.resumeAfterSpeechRecognizer()
 
     fun assignSpeakerName(label: String, name: String) {
         viewModelScope.launch {
@@ -145,8 +162,9 @@ class ActiveMeetingViewModel @Inject constructor(
     }
 
     fun cancelPendingAi() {
+        ttsPlayer.interrupt()   // stop playback first, then cancel the coroutine
         aiJob?.cancel()
-        ttsPlayer.interrupt()
+        recordingService?.resumeAfterSpeechRecognizer()  // ensure mic restarts if TTS was active
         val lastId = uiState.value.lastAiSegmentId
         if (lastId != null) {
             viewModelScope.launch { transcriptionRepo.deleteSegment(lastId) }
@@ -161,11 +179,13 @@ class ActiveMeetingViewModel @Inject constructor(
         val remaining = ((meeting.estimatedDurationMinutes * 60_000L - state.elapsedMs)
             .coerceAtLeast(0) / 60_000).toInt()
 
+        val aiName = settingsRepo.aiWakeName.first().ifBlank { "AI" }
         val response = try {
             askAiApi.ask(
                 AiRequest(
                     meetingContext = buildContext(),
                     question = question,
+                    aiName = aiName,
                     rolePrompt = rolePrompt,
                     participantNames = names,
                     remainingMinutes = remaining
@@ -188,7 +208,10 @@ class ActiveMeetingViewModel @Inject constructor(
             )
         )
         uiState.update { it.copy(aiState = AiState.SPEAKING, lastAiSegmentId = segId) }
+        recordingService?.pauseForSpeechRecognizer()
         try { ttsPlayer.speak(response) } catch (_: Exception) {}
+        recordingService?.resumeAfterSpeechRecognizer()
+        delay(300)
         uiState.update { it.copy(aiState = AiState.IDLE, pendingAiQuery = null, lastAiSegmentId = null) }
     }
 
@@ -220,8 +243,8 @@ class ActiveMeetingViewModel @Inject constructor(
         }
     }
 
-    fun checkWakeWord(text: String): WakeWordDetector.WakeResult? =
-        WakeWordDetector.detect(text)
+    fun checkWakeWord(text: String, wakeName: String): WakeWordDetector.WakeResult? =
+        WakeWordDetector.detect(text, wakeName)
 
     override fun onCleared() {
         ttsPlayer.interrupt()

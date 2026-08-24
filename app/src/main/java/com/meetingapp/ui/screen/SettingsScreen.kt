@@ -5,10 +5,12 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import com.meetingapp.BuildConfig
 import com.meetingapp.viewmodel.SettingsViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -32,8 +34,7 @@ fun SettingsScreen(
         }
     ) { padding ->
         Column(
-            Modifier.fillMaxSize().padding(padding).padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            Modifier.fillMaxSize().padding(padding).padding(16.dp)
         ) {
             OutlinedTextField(
                 value = state.apiKey,
@@ -43,6 +44,7 @@ fun SettingsScreen(
                 visualTransformation = PasswordVisualTransformation(),
                 singleLine = true
             )
+            Spacer(Modifier.height(16.dp))
             OutlinedTextField(
                 value = state.aiWakeName,
                 onValueChange = vm::updateAiWakeName,
@@ -51,6 +53,7 @@ fun SettingsScreen(
                 singleLine = true,
                 supportingText = { Text("出现在句首时唤醒 AI（如「小谈，你怎么看」）") }
             )
+            Spacer(Modifier.height(16.dp))
             Button(
                 onClick = vm::save,
                 modifier = Modifier.fillMaxWidth()
@@ -58,6 +61,7 @@ fun SettingsScreen(
                 Text("保存")
             }
             if (state.saved) {
+                Spacer(Modifier.height(8.dp))
                 Text("已保存", color = MaterialTheme.colorScheme.primary)
             }
 
@@ -68,6 +72,14 @@ fun SettingsScreen(
                 "一小时录音耗电较快，建议接电源。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+
+            Spacer(Modifier.weight(1f))
+            Text(
+                "版本 ${BuildConfig.VERSION_NAME}",
+                modifier = Modifier.align(Alignment.CenterHorizontally),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.outlineVariant
             )
         }
     }

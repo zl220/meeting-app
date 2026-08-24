@@ -30,13 +30,35 @@ class AudioChunkWriter(private val outputDir: File) {
 
     fun flushChunk(): ChunkFile? {
         if (buffer.isEmpty()) return null
-        val file = writeWav(buffer.flattenToBytes())
+        val pcm = buffer.flattenToBytes()
         val startMs = chunkStartMs
         val endMs = System.currentTimeMillis()
         buffer.clear()
         bufferSizeBytes = 0
         chunkStartMs = endMs
+        // Discard silent chunks to avoid Whisper hallucinations on noise/silence
+        if (isSilent(pcm)) return null
+        val file = writeWav(pcm)
         return ChunkFile(file, startMs, endMs)
+    }
+
+    private fun isSilent(pcm: ByteArray): Boolean {
+        if (pcm.size < 2) return true
+        var sumSq = 0.0
+        var i = 0
+        while (i + 1 < pcm.size) {
+            val sample = (pcm[i].toInt() and 0xFF) or (pcm[i + 1].toInt() shl 8)
+            sumSq += sample * sample.toDouble()
+            i += 2
+        }
+        val rms = Math.sqrt(sumSq / (pcm.size / 2))
+        return rms < SILENCE_RMS_THRESHOLD
+    }
+
+    companion object {
+        // ~150 RMS on 16-bit PCM — very conservative to avoid filtering quiet speech.
+        // Speech in a meeting room is typically 800–3000+ RMS.
+        private const val SILENCE_RMS_THRESHOLD = 150.0
     }
 
     private fun writeWav(pcm: ByteArray): File {

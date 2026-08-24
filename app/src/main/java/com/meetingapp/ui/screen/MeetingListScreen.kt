@@ -1,6 +1,7 @@
 package com.meetingapp.ui.screen
 
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -8,9 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
@@ -31,6 +30,8 @@ fun MeetingListScreen(
     vm: MeetingListViewModel = hiltViewModel()
 ) {
     val meetings by vm.meetings.collectAsState()
+    var pendingDelete by remember { mutableStateOf<Meeting?>(null) }
+    val hasActiveMeeting = meetings.any { it.status == MeetingStatus.RECORDING }
 
     Scaffold(
         topBar = {
@@ -44,8 +45,10 @@ fun MeetingListScreen(
             )
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = onNewMeeting) {
-                Icon(Icons.Default.Add, contentDescription = "新建会议")
+            if (!hasActiveMeeting) {
+                FloatingActionButton(onClick = onNewMeeting) {
+                    Icon(Icons.Default.Add, contentDescription = "新建会议")
+                }
             }
         }
     ) { padding ->
@@ -62,9 +65,14 @@ fun MeetingListScreen(
                     MeetingRow(
                         meeting = meeting,
                         onClick = {
-                            when (meeting.status) {
-                                MeetingStatus.RECORDING -> onOpenActive(meeting.id)
-                                else -> onOpenReview(meeting.id)
+                            // Only go to Active if the service is actually running (RECORDING + no other active meeting would conflict)
+                            // After a crash/force-quit, status may still show RECORDING — treat as Review
+                            if (meeting.status == MeetingStatus.RECORDING) onOpenActive(meeting.id)
+                            else onOpenReview(meeting.id)
+                        },
+                        onLongClick = {
+                            if (meeting.status != MeetingStatus.RECORDING) {
+                                pendingDelete = meeting
                             }
                         }
                     )
@@ -73,10 +81,28 @@ fun MeetingListScreen(
             }
         }
     }
+
+    pendingDelete?.let { meeting ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("删除会议") },
+            text = { Text("确定删除「${meeting.title}」？此操作不可撤销。") },
+            confirmButton = {
+                TextButton(
+                    onClick = { vm.deleteMeeting(meeting); pendingDelete = null },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) { Text("删除") }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
+            }
+        )
+    }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun MeetingRow(meeting: Meeting, onClick: () -> Unit) {
+private fun MeetingRow(meeting: Meeting, onClick: () -> Unit, onLongClick: () -> Unit) {
     val sdf = SimpleDateFormat("MM/dd HH:mm", Locale.getDefault())
     val dateStr = meeting.startedAt?.let { sdf.format(Date(it)) } ?: "未开始"
     val statusLabel = when (meeting.status) {
@@ -86,9 +112,18 @@ private fun MeetingRow(meeting: Meeting, onClick: () -> Unit) {
     }
 
     ListItem(
-        modifier = Modifier.clickable(onClick = onClick),
+        modifier = Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick),
         headlineContent = { Text(meeting.title) },
-        supportingContent = { Text("$dateStr · $statusLabel · ${meeting.estimatedDurationMinutes}min") },
+        supportingContent = {
+            Text("$dateStr · $statusLabel · ${meeting.estimatedDurationMinutes}min")
+            if (meeting.status != MeetingStatus.RECORDING) {
+                Text(
+                    "长按删除",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.outlineVariant
+                )
+            }
+        },
         trailingContent = {
             if (meeting.status == MeetingStatus.RECORDING) {
                 Badge { Text("●") }

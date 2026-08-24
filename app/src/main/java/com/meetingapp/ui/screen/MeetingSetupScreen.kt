@@ -1,8 +1,10 @@
 package com.meetingapp.ui.screen
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -12,6 +14,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
@@ -28,6 +34,8 @@ fun MeetingSetupScreen(
     val state by vm.uiState.collectAsState()
     val participants by vm.allParticipants.collectAsState()
     var showAddParticipant by remember { mutableStateOf(false) }
+    val focusManager = LocalFocusManager.current
+    val keyboardController = LocalSoftwareKeyboardController.current
 
     LaunchedEffect(state.savedMeetingId) {
         state.savedMeetingId?.let { onCreated(it) }
@@ -46,7 +54,11 @@ fun MeetingSetupScreen(
         }
     ) { padding ->
         LazyColumn(
-            Modifier.fillMaxSize().padding(padding).padding(horizontal = 16.dp),
+            Modifier
+                .fillMaxSize()
+                .padding(padding)
+                .padding(horizontal = 16.dp)
+                .imePadding(),        // content scrolls above keyboard automatically
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             item {
@@ -55,7 +67,9 @@ fun MeetingSetupScreen(
                     onValueChange = vm::updateTitle,
                     label = { Text("会议标题 *") },
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Down) })
                 )
             }
             item {
@@ -64,7 +78,9 @@ fun MeetingSetupScreen(
                     onValueChange = vm::updateAgenda,
                     label = { Text("议程（可选）") },
                     modifier = Modifier.fillMaxWidth(),
-                    minLines = 3
+                    minLines = 3,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Down) })
                 )
             }
             item {
@@ -73,7 +89,9 @@ fun MeetingSetupScreen(
                     onValueChange = vm::updateLocation,
                     label = { Text("地点（可选）") },
                     modifier = Modifier.fillMaxWidth(),
-                    singleLine = true
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { keyboardController?.hide() })
                 )
             }
             item {
@@ -105,7 +123,10 @@ fun MeetingSetupScreen(
             item {
                 Spacer(Modifier.height(8.dp))
                 Button(
-                    onClick = vm::createMeeting,
+                    onClick = {
+                        keyboardController?.hide()
+                        vm.createMeeting()
+                    },
                     enabled = state.title.isNotBlank() && !state.isSaving,
                     modifier = Modifier.fillMaxWidth()
                 ) {
@@ -131,17 +152,46 @@ fun MeetingSetupScreen(
 @Composable
 private fun DurationPicker(durationMinutes: Int, onChanged: (Int) -> Unit) {
     val options = listOf(30, 45, 60, 90, 120, 180)
-    Column {
+    var showCustom by remember { mutableStateOf(durationMinutes !in options) }
+    var customText by remember { mutableStateOf(if (durationMinutes !in options) durationMinutes.toString() else "") }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text("预计时长", style = MaterialTheme.typography.titleMedium)
-        Spacer(Modifier.height(8.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            modifier = Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState())
+        ) {
             options.forEach { mins ->
                 FilterChip(
-                    selected = durationMinutes == mins,
-                    onClick = { onChanged(mins) },
+                    selected = !showCustom && durationMinutes == mins,
+                    onClick = { showCustom = false; customText = ""; onChanged(mins) },
                     label = { Text("${mins}min") }
                 )
             }
+            FilterChip(
+                selected = showCustom,
+                onClick = { showCustom = true },
+                label = { Text("自定义") }
+            )
+        }
+        if (showCustom) {
+            OutlinedTextField(
+                value = customText,
+                onValueChange = { v ->
+                    customText = v.filter { it.isDigit() }.take(3)
+                    val mins = customText.toIntOrNull()
+                    if (mins != null && mins in 1..600) onChanged(mins)
+                },
+                label = { Text("自定义时长（分钟）") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = KeyboardType.Number,
+                    imeAction = ImeAction.Done
+                ),
+                keyboardActions = KeyboardActions(onDone = { /* close keyboard */ }),
+                supportingText = { Text("1–600 分钟") }
+            )
         }
     }
 }
@@ -171,6 +221,7 @@ private fun ParticipantRow(
 private fun AddParticipantDialog(onDismiss: () -> Unit, onSave: (Participant) -> Unit) {
     var name by remember { mutableStateOf("") }
     var email by remember { mutableStateOf("") }
+    val focusManager = LocalFocusManager.current
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -181,13 +232,19 @@ private fun AddParticipantDialog(onDismiss: () -> Unit, onSave: (Participant) ->
                     value = name,
                     onValueChange = { name = it },
                     label = { Text("姓名 *") },
-                    singleLine = true
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(imeAction = ImeAction.Next),
+                    keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Down) })
                 )
                 OutlinedTextField(
                     value = email,
                     onValueChange = { email = it },
                     label = { Text("邮箱") },
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Email,
+                        imeAction = ImeAction.Done
+                    ),
+                    keyboardActions = KeyboardActions(onDone = { focusManager.clearFocus() }),
                     singleLine = true
                 )
             }

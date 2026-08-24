@@ -20,6 +20,8 @@ class MeetingRepository @Inject constructor(
 
     suspend fun update(meeting: Meeting) = dao.update(meeting)
 
+    suspend fun delete(meeting: Meeting) = dao.delete(meeting)
+
     suspend fun setStarted(id: Long) = dao.setStarted(id, startedAt = System.currentTimeMillis())
 
     suspend fun setFinished(id: Long) = dao.setFinished(id, endedAt = System.currentTimeMillis())

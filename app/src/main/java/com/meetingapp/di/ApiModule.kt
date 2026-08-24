@@ -52,8 +52,9 @@ object ApiModule {
     fun provideTtsPlayer(
         service: OpenAiService,
         @Named("openai_api_key_flow") apiKeyFlow: Flow<String>,
-        @Named("cache_dir") cacheDir: File
-    ): OpenAiTtsPlayer = OpenAiTtsPlayer(service, apiKeyFlow, cacheDir)
+        @Named("cache_dir") cacheDir: File,
+        @ApplicationContext ctx: Context
+    ): OpenAiTtsPlayer = OpenAiTtsPlayer(service, apiKeyFlow, cacheDir, ctx)
 
     @Provides
     @Singleton

@@ -21,7 +21,7 @@ class MeetingListViewModel @Inject constructor(
 
     fun deleteMeeting(meeting: Meeting) {
         viewModelScope.launch {
-            meetingRepo.update(meeting)
+            meetingRepo.delete(meeting)
         }
     }
 }

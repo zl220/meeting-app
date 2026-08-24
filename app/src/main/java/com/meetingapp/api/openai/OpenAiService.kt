@@ -14,9 +14,8 @@ interface OpenAiService {
         @Part file: MultipartBody.Part,
         @Part("model") model: RequestBody,
         @Part("response_format") responseFormat: RequestBody,
-        @Part("language") language: RequestBody,
-        @Part("prompt") prompt: RequestBody?,
-        @Part("keywords") keywords: RequestBody?
+        @Part("language") language: RequestBody?,
+        @Part("prompt") prompt: RequestBody?
     ): TranscriptionResponse
 
     @POST("chat/completions")

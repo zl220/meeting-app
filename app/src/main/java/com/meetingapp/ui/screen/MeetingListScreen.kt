@@ -146,12 +146,22 @@ private fun MeetingRow(meeting: Meeting, onClick: () -> Unit, onLongClick: () ->
         MeetingStatus.FINISHED -> "已完成"
         MeetingStatus.IDLE -> "准备中"
     }
+    // Finished meetings: show actual duration (from timestamps) alongside the planned one.
+    val actualMinutes = if (meeting.status == MeetingStatus.FINISHED &&
+        meeting.startedAt != null && meeting.endedAt != null
+    ) {
+        ((meeting.endedAt - meeting.startedAt) / 60_000L).coerceAtLeast(0)
+    } else null
+    val durationStr = if (actualMinutes != null)
+        "实际 ${actualMinutes}min / 计划 ${meeting.estimatedDurationMinutes}min"
+    else
+        "计划 ${meeting.estimatedDurationMinutes}min"
 
     ListItem(
         modifier = Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick),
         headlineContent = { Text(meeting.title) },
         supportingContent = {
-            Text("$dateStr · $statusLabel · ${meeting.estimatedDurationMinutes}min")
+            Text("$dateStr · $statusLabel · $durationStr")
             if (meeting.status != MeetingStatus.RECORDING) {
                 Text(
                     "长按：编辑 / 删除",

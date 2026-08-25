@@ -29,6 +29,8 @@ import com.meetingapp.viewmodel.MeetingSetupViewModel
 fun MeetingSetupScreen(
     onCreated: (Long) -> Unit,
     onBack: () -> Unit,
+    editMeetingId: Long? = null,
+    onEdited: () -> Unit = {},
     vm: MeetingSetupViewModel = hiltViewModel()
 ) {
     val state by vm.uiState.collectAsState()
@@ -37,14 +39,19 @@ fun MeetingSetupScreen(
     val focusManager = LocalFocusManager.current
     val keyboardController = LocalSoftwareKeyboardController.current
 
+    LaunchedEffect(editMeetingId) {
+        if (editMeetingId != null) vm.loadForEdit(editMeetingId)
+    }
+
     LaunchedEffect(state.savedMeetingId) {
-        state.savedMeetingId?.let { onCreated(it) }
+        val id = state.savedMeetingId ?: return@LaunchedEffect
+        if (state.isEditing) onEdited() else onCreated(id)
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("新建会议") },
+                title = { Text(if (state.isEditing) "编辑会议" else "新建会议") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, null)
@@ -125,13 +132,13 @@ fun MeetingSetupScreen(
                 Button(
                     onClick = {
                         keyboardController?.hide()
-                        vm.createMeeting()
+                        if (state.isEditing) vm.saveEdits() else vm.createMeeting()
                     },
                     enabled = state.title.isNotBlank() && !state.isSaving,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     if (state.isSaving) CircularProgressIndicator(Modifier.size(20.dp))
-                    else Text("开始会议")
+                    else Text(if (state.isEditing) "保存修改" else "开始会议")
                 }
                 Spacer(Modifier.height(24.dp))
             }

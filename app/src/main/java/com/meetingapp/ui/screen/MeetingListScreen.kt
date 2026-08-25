@@ -7,6 +7,8 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -20,17 +22,19 @@ import com.meetingapp.viewmodel.MeetingListViewModel
 import java.text.SimpleDateFormat
 import java.util.*
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalFoundationApi::class)
 @Composable
 fun MeetingListScreen(
     onNewMeeting: () -> Unit,
     onOpenActive: (Long) -> Unit,
     onOpenReview: (Long) -> Unit,
+    onEditMeeting: (Long) -> Unit,
     onSettings: () -> Unit,
     vm: MeetingListViewModel = hiltViewModel()
 ) {
     val meetings by vm.meetings.collectAsState()
     var pendingDelete by remember { mutableStateOf<Meeting?>(null) }
+    var menuFor by remember { mutableStateOf<Meeting?>(null) }
     val hasActiveMeeting = meetings.any { it.status == MeetingStatus.RECORDING }
 
     Scaffold(
@@ -72,12 +76,44 @@ fun MeetingListScreen(
                         },
                         onLongClick = {
                             if (meeting.status != MeetingStatus.RECORDING) {
-                                pendingDelete = meeting
+                                menuFor = meeting
                             }
                         }
                     )
                     HorizontalDivider()
                 }
+            }
+        }
+    }
+
+    menuFor?.let { meeting ->
+        ModalBottomSheet(onDismissRequest = { menuFor = null }) {
+            Column(Modifier.fillMaxWidth().padding(bottom = 16.dp)) {
+                Text(
+                    meeting.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(horizontal = 24.dp, vertical = 8.dp)
+                )
+                ListItem(
+                    modifier = Modifier.combinedClickable(
+                        onClick = { onEditMeeting(meeting.id); menuFor = null },
+                        onLongClick = {}
+                    ),
+                    leadingContent = { Icon(Icons.Default.Edit, null) },
+                    headlineContent = { Text("编辑") }
+                )
+                ListItem(
+                    modifier = Modifier.combinedClickable(
+                        onClick = { pendingDelete = meeting; menuFor = null },
+                        onLongClick = {}
+                    ),
+                    leadingContent = {
+                        Icon(Icons.Default.Delete, null, tint = MaterialTheme.colorScheme.error)
+                    },
+                    headlineContent = {
+                        Text("删除", color = MaterialTheme.colorScheme.error)
+                    }
+                )
             }
         }
     }
@@ -118,7 +154,7 @@ private fun MeetingRow(meeting: Meeting, onClick: () -> Unit, onLongClick: () ->
             Text("$dateStr · $statusLabel · ${meeting.estimatedDurationMinutes}min")
             if (meeting.status != MeetingStatus.RECORDING) {
                 Text(
-                    "长按删除",
+                    "长按：编辑 / 删除",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.outlineVariant
                 )

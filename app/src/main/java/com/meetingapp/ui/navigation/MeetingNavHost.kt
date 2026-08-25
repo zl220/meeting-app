@@ -15,6 +15,9 @@ import com.meetingapp.ui.screen.SettingsScreen
 sealed class Screen(val route: String) {
     object List : Screen("meetings")
     object Setup : Screen("setup")
+    object Edit : Screen("edit/{meetingId}") {
+        fun go(id: Long) = "edit/$id"
+    }
     object Active : Screen("active/{meetingId}") {
         fun go(id: Long) = "active/$id"
     }
@@ -33,6 +36,7 @@ fun MeetingNavHost() {
                 onNewMeeting = { navController.navigate(Screen.Setup.route) },
                 onOpenActive = { id -> navController.navigate(Screen.Active.go(id)) },
                 onOpenReview = { id -> navController.navigate(Screen.Review.go(id)) },
+                onEditMeeting = { id -> navController.navigate(Screen.Edit.go(id)) },
                 onSettings = { navController.navigate(Screen.Settings.route) }
             )
         }
@@ -43,6 +47,18 @@ fun MeetingNavHost() {
                         popUpTo(Screen.Setup.route) { inclusive = true }
                     }
                 },
+                onBack = { navController.popBackStack() }
+            )
+        }
+        composable(
+            route = Screen.Edit.route,
+            arguments = listOf(navArgument("meetingId") { type = NavType.LongType })
+        ) { back ->
+            val id = back.arguments?.getLong("meetingId") ?: return@composable
+            MeetingSetupScreen(
+                editMeetingId = id,
+                onCreated = {},
+                onEdited = { navController.popBackStack() },
                 onBack = { navController.popBackStack() }
             )
         }

@@ -5,19 +5,25 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import android.content.Intent
+import android.widget.Toast
+import androidx.core.content.FileProvider
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import com.meetingapp.viewmodel.MinutesReviewViewModel
 import com.meetingapp.viewmodel.SpeakerMapping
+import java.io.File
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -27,6 +33,7 @@ fun MinutesReviewScreen(
     vm: MinutesReviewViewModel = hiltViewModel()
 ) {
     val state by vm.uiState.collectAsState()
+    val context = LocalContext.current
 
     LaunchedEffect(meetingId) { vm.load(meetingId) }
 
@@ -147,6 +154,19 @@ fun MinutesReviewScreen(
                 }
             }
 
+            // Export the full meeting recording (R7 audio file), if one was saved.
+            val audioPath = state.meeting?.audioFilePath
+            val audioExists = remember(audioPath) { audioPath != null && File(audioPath).exists() }
+            OutlinedButton(
+                onClick = { shareRecording(context, audioPath!!, state.meeting?.title) },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                enabled = audioExists
+            ) {
+                Icon(Icons.Default.Share, null, Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                Text(if (audioExists) "导出完整录音" else "无录音文件")
+            }
+
             Button(
                 onClick = onDone,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
@@ -154,6 +174,29 @@ fun MinutesReviewScreen(
 
             Spacer(Modifier.height(16.dp))
         }
+    }
+}
+
+/** Share the meeting recording via the system share sheet using a FileProvider URI. */
+private fun shareRecording(context: android.content.Context, path: String, meetingTitle: String?) {
+    val file = File(path)
+    if (!file.exists()) {
+        Toast.makeText(context, "录音文件不存在", Toast.LENGTH_SHORT).show()
+        return
+    }
+    try {
+        val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
+        val intent = Intent(Intent.ACTION_SEND).apply {
+            type = "audio/mp4"
+            putExtra(Intent.EXTRA_STREAM, uri)
+            putExtra(Intent.EXTRA_SUBJECT, "会议录音：${meetingTitle ?: "会议"}")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(Intent.createChooser(intent, "导出录音").apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        })
+    } catch (e: Exception) {
+        Toast.makeText(context, "导出失败：${e.message}", Toast.LENGTH_LONG).show()
     }
 }
 

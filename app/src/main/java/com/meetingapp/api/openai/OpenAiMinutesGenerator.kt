@@ -20,15 +20,18 @@ class OpenAiMinutesGenerator @Inject constructor(
         val agendaNote = if (!agenda.isNullOrBlank()) "议程：$agenda\n\n" else ""
 
         val systemPrompt = """
-你是一个专业会议记录助手。根据下方对话记录生成结构化纪要，使用 Markdown 格式，包含以下四个部分：
-1. **讨论主题**
-2. **每位参会者的核心观点**（按人名列出）
-3. **达成的共识**
-4. **待办事项与负责人**
+你是一个专业会议记录助手。根据下方对话记录生成结构化纪要，使用 Markdown 格式。
 
-要求：
+$ATTRIBUTION_RULES
+
+纪要结构（按话题组织，而非强行按人分）：
+1. **讨论主题**
+2. **主要观点与讨论**——按议题归纳要点；只有在能确信的情况下才署名，否则用「有观点认为…」「有人提出…」等不指名的表述
+3. **达成的共识**
+4. **待办事项**——如能确信负责人则注明，否则写「待指派」
+
+其他要求：
 - 清理口语词（嗯、那个、这个、然后等）
-- 按话题分段
 - AI 发言单独成一块，标题为「AI 参与意见」
 - 不要捏造内容，只提炼实际出现的信息
         """.trimIndent()
@@ -69,9 +72,11 @@ class OpenAiMinutesGenerator @Inject constructor(
 你是一个专业会议记录助手，正在会议进行中实时维护一份会议纪要。
 下面给你「当前纪要」和「新增的对话记录」。请把新增内容合并进当前纪要，输出**完整的更新后纪要**。
 
+$ATTRIBUTION_RULES
+
 要求：
 - 在现有纪要基础上追加/修订，不要推翻已有结构，保持稳定
-- 保持原有 Markdown 结构：讨论主题、每位参会者核心观点（按人名）、达成的共识、待办事项与负责人；AI 发言归入「AI 参与意见」
+- 保持原有 Markdown 结构：讨论主题、主要观点与讨论、达成的共识、待办事项；AI 发言归入「AI 参与意见」
 - 清理口语词（嗯、那个、这个、然后等）
 - 不要捏造内容，只提炼实际出现的信息
 - 直接输出更新后的纪要全文，不要解释你做了什么
@@ -101,9 +106,30 @@ class OpenAiMinutesGenerator @Inject constructor(
             ?: currentDraft
     }
 
+    /**
+     * Build the transcript for the prompt. Speech with no assigned real name is labeled
+     * "发言人未知" so the model can't mistake the generic "发言" tag for a person. Lines
+     * with a real speaker name (manually assigned) keep it.
+     */
     private fun buildTranscript(segments: List<Segment>): String =
         segments.joinToString("\n") { seg ->
-            val speaker = if (seg.isAi) "【AI】" else (seg.speakerName ?: seg.speakerLabel)
+            val speaker = when {
+                seg.isAi -> "【AI】"
+                seg.speakerName != null -> seg.speakerName
+                else -> "发言人未知"
+            }
             "$speaker：${seg.text}"
         }
+
+    companion object {
+        // Shared rules that stop the model from inventing who-said-what when the transcript
+        // has no reliable speaker attribution (whisper-1 does no diarization).
+        private val ATTRIBUTION_RULES = """
+关于发言人归属（重要，避免出错）：
+- 语音无法自动区分说话人。标为「发言人未知」的内容，说话人不明，**严禁猜测或臆断是谁说的**。
+- 只有以下情况才可将观点归于某人：(1) 该发言已标注了具体人名；(2) 发言内容本身明确表明了身份（如「我是张三…」「作为财务，我认为…」）。
+- 其余一律不点名，用「有观点认为…」「有人提出…」「会上讨论到…」等中性表述。
+- 宁可不标明是谁说的，也不要错误归属。
+        """.trimIndent()
+    }
 }

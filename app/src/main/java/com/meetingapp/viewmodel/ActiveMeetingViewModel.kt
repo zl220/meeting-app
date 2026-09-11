@@ -247,11 +247,15 @@ class ActiveMeetingViewModel @Inject constructor(
     }
 
     fun cancelPendingAi() {
+        val wasSpeaking = uiState.value.aiState == AiState.SPEAKING
         ttsPlayer.interrupt()   // stop playback first, then cancel the coroutine
         aiJob?.cancel()
         recordingService?.resumeAfterSpeechRecognizer()  // ensure mic restarts if TTS was active
+        // If the AI was already speaking, its opinion is on the record — keep the segment,
+        // just stop the audio. Only discard it when interrupting during THINKING, where
+        // nothing was said yet (the segment, if any, is empty/premature).
         val lastId = uiState.value.lastAiSegmentId
-        if (lastId != null) {
+        if (!wasSpeaking && lastId != null) {
             viewModelScope.launch { transcriptionRepo.deleteSegment(lastId) }
         }
         uiState.update { it.copy(aiState = AiState.IDLE, pendingAiQuery = null, lastAiSegmentId = null) }

@@ -28,7 +28,7 @@ class DriveMinutesApi @Inject constructor(
         meeting: Meeting,
         minutes: Minutes,
         participants: List<Participant>
-    ) = withContext(Dispatchers.Main) {
+    ) {
         val sdf = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault())
         val dateStr = sdf.format(Date(meeting.startedAt ?: System.currentTimeMillis()))
         val subject = "[会议纪要] ${meeting.title} $dateStr"
@@ -36,8 +36,10 @@ class DriveMinutesApi @Inject constructor(
 
         val emails = participants.map { it.email }.filter { it.isNotBlank() }
 
-        val intent = android.content.Intent(android.content.Intent.ACTION_SEND_MULTIPLE).apply {
-            type = "message/rfc822"
+        // ACTION_SENDTO + mailto: resolves to email clients only (ACTION_SEND_MULTIPLE +
+        // message/rfc822 offered non-email apps and failed on some devices).
+        val intent = android.content.Intent(android.content.Intent.ACTION_SENDTO).apply {
+            data = android.net.Uri.parse("mailto:")
             putExtra(android.content.Intent.EXTRA_EMAIL, emails.toTypedArray())
             putExtra(android.content.Intent.EXTRA_SUBJECT, subject)
             putExtra(android.content.Intent.EXTRA_TEXT, body)

@@ -62,16 +62,36 @@ class MinutesReviewViewModel @Inject constructor(
             return
         }
 
-        uiState.update { it.copy(isGenerating = true, error = null) }
+        // Show the rolling draft instantly (if any) so the user isn't staring at a spinner
+        // while the full finalize runs. The draft is unedited, so it's safe to replace.
+        val draft = minutesRepo.getDraft(meeting.id)
+        if (draft != null && draft.content.isNotBlank()) {
+            uiState.update {
+                it.copy(isGenerating = true, minutes = draft, editedContent = draft.content)
+            }
+        } else {
+            uiState.update { it.copy(isGenerating = true, error = null) }
+        }
+
         val minutes = try {
             // T3 (R10): first finalize — regenerate from the full transcript, clear the draft.
             minutesRepo.finalize(meeting, segments)
         } catch (e: Exception) {
-            uiState.update { it.copy(isGenerating = false, error = "生成失败：${e.message}") }
+            // Finalize failed: keep showing the draft (if we had one) so the user still sees
+            // something usable, and surface the error non-fatally.
+            uiState.update {
+                it.copy(isGenerating = false, error = "精修纪要失败，显示的是实时草稿：${e.message}")
+            }
             return
         }
-        uiState.update {
-            it.copy(isGenerating = false, minutes = minutes, editedContent = minutes.content)
+        // Only overwrite the editor if the user hasn't started editing the draft in the meantime.
+        uiState.update { state ->
+            val userEdited = draft != null && state.editedContent != draft.content
+            state.copy(
+                isGenerating = false,
+                minutes = minutes,
+                editedContent = if (userEdited) state.editedContent else minutes.content
+            )
         }
     }
 

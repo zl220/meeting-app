@@ -73,7 +73,9 @@ fun MinutesReviewScreen(
         }
     ) { padding ->
 
-        if (state.isGenerating) {
+        // Full-screen spinner only when there's nothing to show yet. If a rolling draft is
+        // available, we render it right away and finalize in the background (banner below).
+        if (state.isGenerating && state.minutes == null) {
             Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(16.dp)) {
                     CircularProgressIndicator()
@@ -88,6 +90,24 @@ fun MinutesReviewScreen(
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
             Spacer(Modifier.height(4.dp))
+
+            // Draft shown, finalize still running: tell the user it's the live draft being polished.
+            if (state.isGenerating && state.minutes != null) {
+                Surface(color = MaterialTheme.colorScheme.secondaryContainer, modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        CircularProgressIndicator(Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Text(
+                            "显示的是实时草稿，正在生成最终纪要…",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                        )
+                    }
+                }
+            }
 
             // Minutes content — toggle between rendered preview and editable source
             var editing by remember { mutableStateOf(false) }

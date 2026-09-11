@@ -48,6 +48,9 @@ class TranscriptionRepository @Inject constructor(
             Log.d("TranscriptionRepo", "Transcribed ${filtered.size}/${segments.size} segment(s) from ${chunk.file.name}")
             filtered.forEach { segmentDao.insert(it) }
             chunkDao.markTranscribed(chunkId)
+            // The per-chunk WAV is only needed for this one transcription. Delete it now
+            // so temp chunks don't pile up; the full-meeting M4A is kept separately.
+            runCatching { chunk.file.delete() }
         } catch (e: Exception) {
             Log.e("TranscriptionRepo", "transcribe failed for ${chunk.file.name}", e)
         }

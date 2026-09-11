@@ -2,6 +2,7 @@ package com.meetingapp.di
 
 import android.content.Context
 import androidx.room.Room
+import com.meetingapp.BuildConfig
 import com.meetingapp.api.openai.OpenAiService
 import com.meetingapp.data.db.MeetingDatabase
 import com.meetingapp.util.Constants
@@ -24,8 +25,10 @@ object AppModule {
     @Provides
     @Singleton
     fun provideDatabase(@ApplicationContext ctx: Context): MeetingDatabase =
+        // No fallbackToDestructiveMigration: a schema bump must ship a real Migration
+        // (register it via .addMigrations(...)) so users never lose stored meetings,
+        // minutes, or recordings. A missing migration fails loudly at open time.
         Room.databaseBuilder(ctx, MeetingDatabase::class.java, "meeting_db")
-            .fallbackToDestructiveMigration()
             .build()
 
     @Provides fun provideParticipantDao(db: MeetingDatabase) = db.participantDao()
@@ -39,7 +42,10 @@ object AppModule {
     fun provideOkHttpClient(): OkHttpClient =
         OkHttpClient.Builder()
             .addInterceptor(HttpLoggingInterceptor().apply {
-                level = HttpLoggingInterceptor.Level.HEADERS
+                // BODY in debug for troubleshooting; NONE in release so the
+                // "Authorization: Bearer <key>" header never lands in logcat.
+                level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BODY
+                        else HttpLoggingInterceptor.Level.NONE
             })
             .connectTimeout(60, TimeUnit.SECONDS)
             .readTimeout(120, TimeUnit.SECONDS)

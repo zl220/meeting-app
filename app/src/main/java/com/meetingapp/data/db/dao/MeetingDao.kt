@@ -10,6 +10,9 @@ interface MeetingDao {
     @Query("SELECT * FROM meetings ORDER BY id DESC")
     fun getAll(): Flow<List<Meeting>>
 
+    @Query("SELECT * FROM meetings")
+    suspend fun getAllOnce(): List<Meeting>
+
     @Query("SELECT * FROM meetings WHERE id = :id")
     suspend fun getById(id: Long): Meeting?
 

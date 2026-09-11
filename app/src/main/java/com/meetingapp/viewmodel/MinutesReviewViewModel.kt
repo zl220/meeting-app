@@ -15,8 +15,6 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-data class SpeakerMapping(val label: String, val assignedName: String?)
-
 data class MinutesReviewUiState(
     val meeting: Meeting? = null,
     val participants: List<Participant> = emptyList(),
@@ -27,7 +25,6 @@ data class MinutesReviewUiState(
     val savedToDrive: Boolean = false,
     val driveUrl: String? = null,
     val emailSent: Boolean = false,
-    val speakerMappings: List<SpeakerMapping> = emptyList(),
     val error: String? = null
 )
 
@@ -48,17 +45,8 @@ class MinutesReviewViewModel @Inject constructor(
             val participants = meetingRepo.getParticipants(id)
             val segments = transcriptionRepo.getAllSegmentsOnce(id)
 
-            val mappings = segments
-                .filter { !it.isAi }
-                .map { it.speakerLabel }
-                .distinct()
-                .map { label ->
-                    val assigned = segments.firstOrNull { it.speakerLabel == label }?.speakerName
-                    SpeakerMapping(label, assigned)
-                }
-
             uiState.update {
-                it.copy(meeting = meeting, participants = participants, speakerMappings = mappings)
+                it.copy(meeting = meeting, participants = participants)
             }
             generateMinutes(meeting, segments)
         }
@@ -89,17 +77,11 @@ class MinutesReviewViewModel @Inject constructor(
 
     fun updateContent(content: String) = uiState.update { it.copy(editedContent = content) }
 
-    fun assignSpeakerName(label: String, name: String) {
-        viewModelScope.launch {
-            transcriptionRepo.assignSpeakerName(meetingId, label, name)
-            uiState.update { state ->
-                state.copy(
-                    speakerMappings = state.speakerMappings.map {
-                        if (it.label == label) it.copy(assignedName = name) else it
-                    }
-                )
-            }
-        }
+    /** Update the minutes text AND persist immediately (used when assigning speakers). */
+    fun updateAndPersist(content: String) {
+        uiState.update { it.copy(editedContent = content) }
+        val id = uiState.value.minutes?.id ?: return
+        viewModelScope.launch { minutesRepo.updateContent(id, content) }
     }
 
     fun saveToDrive() {

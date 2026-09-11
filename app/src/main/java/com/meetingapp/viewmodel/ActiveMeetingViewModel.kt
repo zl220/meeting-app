@@ -46,6 +46,8 @@ data class ActiveMeetingUiState(
     val meeting: Meeting? = null,
     val participants: List<Participant> = emptyList(),
     val elapsedMs: Long = 0L,
+    // True when the user manually paused recording (break / late start). Timer freezes too.
+    val isPaused: Boolean = false,
     // True when no OpenAI API key is set — transcription/AI/minutes will all fail silently otherwise.
     val apiKeyMissing: Boolean = false,
     val aiState: AiState = AiState.IDLE,
@@ -197,7 +199,10 @@ class ActiveMeetingViewModel @Inject constructor(
     }
 
     fun pauseMicForPtt() = recordingService?.pauseForSpeechRecognizer()
-    fun resumeMicAfterPtt() = recordingService?.resumeAfterSpeechRecognizer()
+    fun resumeMicAfterPtt() {
+        // Don't resume if the user manually paused the meeting.
+        if (!uiState.value.isPaused) recordingService?.resumeAfterSpeechRecognizer()
+    }
 
     /**
      * Open the minutes preview (R10). Flushes the latest audio and folds any pending
@@ -323,13 +328,27 @@ class ActiveMeetingViewModel @Inject constructor(
     }
 
     private fun startTimer() {
-        val startMs = System.currentTimeMillis()
+        // Accumulate elapsed time only while not paused, so breaks don't count.
         timerJob = viewModelScope.launch {
+            var lastTick = System.currentTimeMillis()
             while (true) {
                 delay(1000)
-                uiState.update { it.copy(elapsedMs = System.currentTimeMillis() - startMs) }
+                val now = System.currentTimeMillis()
+                val delta = now - lastTick
+                lastTick = now
+                if (!uiState.value.isPaused) {
+                    uiState.update { it.copy(elapsedMs = it.elapsedMs + delta) }
+                }
             }
         }
+    }
+
+    /** Manually pause recording (late start / break). Releases the mic and freezes the timer. */
+    fun togglePause() {
+        val nowPaused = !uiState.value.isPaused
+        uiState.update { it.copy(isPaused = nowPaused) }
+        if (nowPaused) recordingService?.pauseForSpeechRecognizer()
+        else recordingService?.resumeAfterSpeechRecognizer()
     }
 
     fun checkWakeWord(text: String, wakeName: String): WakeWordDetector.WakeResult? =

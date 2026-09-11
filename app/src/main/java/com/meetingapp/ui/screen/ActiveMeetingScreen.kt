@@ -26,6 +26,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -66,7 +68,6 @@ fun ActiveMeetingScreen(
     val amplitude by vm.amplitude.collectAsState()
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
-    var assigningLabel by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(meetingId) { vm.load(meetingId) }
 
@@ -101,6 +102,12 @@ fun ActiveMeetingScreen(
             TopAppBar(
                 title = { Text(meeting?.title ?: "会议进行中", maxLines = 1) },
                 actions = {
+                    IconButton(onClick = { vm.togglePause() }) {
+                        Icon(
+                            if (state.isPaused) Icons.Default.PlayArrow else Icons.Default.Pause,
+                            contentDescription = if (state.isPaused) "恢复录音" else "暂停录音"
+                        )
+                    }
                     IconButton(onClick = { vm.openMinutesPreview() }) {
                         Icon(Icons.Default.Description, contentDescription = "预览会议纪要")
                     }
@@ -139,6 +146,18 @@ fun ActiveMeetingScreen(
                 }
             }
 
+            // Paused banner — recording and timer are frozen.
+            if (state.isPaused) {
+                Surface(color = MaterialTheme.colorScheme.tertiaryContainer, modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        "⏸ 录音已暂停，计时同时暂停。点右上角 ▶ 恢复。",
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        color = MaterialTheme.colorScheme.onTertiaryContainer,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+            }
+
             // Waveform bar — always visible while recording
             WaveformBar(amplitude = amplitude)
 
@@ -155,11 +174,7 @@ fun ActiveMeetingScreen(
                     contentPadding = PaddingValues(vertical = 8.dp)
                 ) {
                     items(segments, key = { it.id }) { seg ->
-                        SegmentBubble(
-                            segment = seg,
-                            participants = state.participants,
-                            onAssignSpeaker = { label -> assigningLabel = label }
-                        )
+                        SegmentBubble(segment = seg)
                     }
                 }
             }
@@ -199,15 +214,6 @@ fun ActiveMeetingScreen(
 
             Spacer(Modifier.height(8.dp))
         }
-    }
-
-    assigningLabel?.let { label ->
-        SpeakerAssignDialog(
-            label = label,
-            participants = state.participants,
-            onAssign = { name -> vm.assignSpeakerName(label, name); assigningLabel = null },
-            onDismiss = { assigningLabel = null }
-        )
     }
 
     if (state.previewOpen) {
@@ -394,67 +400,29 @@ private fun MeetingIdleCard(
 // ── Segment bubble ──────────────────────────────────────────────────────────
 
 @Composable
-private fun SegmentBubble(segment: Segment, participants: List<Participant>, onAssignSpeaker: (String) -> Unit) {
+private fun SegmentBubble(segment: Segment) {
     val isAi = segment.isAi
-    val displayName = when {
-        isAi -> "AI"
-        segment.speakerName != null -> segment.speakerName
-        else -> segment.speakerLabel
-    }
-    val isUnnamed = !isAi && segment.speakerName == null
+    // whisper-1 can't tell speakers apart, so unnamed speech just reads as "发言".
+    val displayName = if (isAi) "AI" else segment.speakerName ?: "发言"
     val bgColor = if (isAi) MaterialTheme.colorScheme.tertiaryContainer else MaterialTheme.colorScheme.surfaceVariant
+    val chipColor = if (isAi) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primaryContainer
+    val chipContentColor = if (isAi) MaterialTheme.colorScheme.onTertiary else MaterialTheme.colorScheme.onPrimaryContainer
 
     Column(
         Modifier.fillMaxWidth().background(bgColor, MaterialTheme.shapes.small).padding(horizontal = 10.dp, vertical = 6.dp)
     ) {
-        SpeakerChip(name = displayName, isUnnamed = isUnnamed, isAi = isAi,
-            onClick = if (!isAi) ({ onAssignSpeaker(segment.speakerLabel) }) else null)
+        Surface(color = chipColor, shape = MaterialTheme.shapes.extraSmall) {
+            Text(
+                displayName,
+                Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                style = MaterialTheme.typography.labelSmall,
+                color = chipContentColor,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
         Spacer(Modifier.height(2.dp))
         Text(segment.text, style = MaterialTheme.typography.bodyMedium)
     }
-}
-
-@Composable
-private fun SpeakerChip(name: String, isUnnamed: Boolean, isAi: Boolean, onClick: (() -> Unit)?) {
-    val containerColor = when { isAi -> MaterialTheme.colorScheme.tertiary; isUnnamed -> MaterialTheme.colorScheme.secondaryContainer; else -> MaterialTheme.colorScheme.primaryContainer }
-    val contentColor = when { isAi -> MaterialTheme.colorScheme.onTertiary; isUnnamed -> MaterialTheme.colorScheme.onSecondaryContainer; else -> MaterialTheme.colorScheme.onPrimaryContainer }
-    Surface(color = containerColor, shape = MaterialTheme.shapes.extraSmall,
-        modifier = Modifier.then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)) {
-        Row(Modifier.padding(horizontal = 6.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            if (isUnnamed) Icon(Icons.Default.Person, null, Modifier.size(12.dp), tint = contentColor)
-            Text(if (isUnnamed) "$name  ✎" else name, style = MaterialTheme.typography.labelSmall, color = contentColor, fontWeight = FontWeight.SemiBold)
-        }
-    }
-}
-
-// ── Speaker assign dialog ───────────────────────────────────────────────────
-
-@Composable
-private fun SpeakerAssignDialog(label: String, participants: List<Participant>, onAssign: (String) -> Unit, onDismiss: () -> Unit) {
-    var customName by remember { mutableStateOf("") }
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        icon = { Icon(Icons.Default.Person, null) },
-        title = { Text("标注发言人") },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(
-                    "当前无法自动区分说话人，指定的姓名会应用到所有「发言」片段。",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                if (participants.isNotEmpty()) {
-                    Text("从参会者中选择", style = MaterialTheme.typography.labelMedium)
-                    participants.forEach { p -> OutlinedButton(onClick = { onAssign(p.name) }, modifier = Modifier.fillMaxWidth()) { Text(p.name) } }
-                    HorizontalDivider()
-                    Text("或手动输入", style = MaterialTheme.typography.labelMedium)
-                }
-                OutlinedTextField(value = customName, onValueChange = { customName = it }, label = { Text("姓名") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-            }
-        },
-        confirmButton = { TextButton(onClick = { if (customName.isNotBlank()) onAssign(customName) }, enabled = customName.isNotBlank()) { Text("确定") } },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } }
-    )
 }
 
 // ── AI status bar ───────────────────────────────────────────────────────────

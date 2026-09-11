@@ -20,11 +20,9 @@ class SettingsRepository @Inject constructor(
 ) {
     private val KEY_API_KEY = stringPreferencesKey("openai_api_key")
     private val KEY_AI_WAKE_NAME = stringPreferencesKey("ai_wake_name")
-    private val KEY_PREFERRED_LANG = stringPreferencesKey("preferred_language")
 
     val apiKey: Flow<String> = context.dataStore.data.map { it[KEY_API_KEY] ?: "" }
     val aiWakeName: Flow<String> = context.dataStore.data.map { it[KEY_AI_WAKE_NAME] ?: "小谈" }
-    val preferredLanguage: Flow<String> = context.dataStore.data.map { it[KEY_PREFERRED_LANG] ?: "zh" }
 
     suspend fun setApiKey(key: String) {
         context.dataStore.edit { it[KEY_API_KEY] = key }
@@ -32,9 +30,5 @@ class SettingsRepository @Inject constructor(
 
     suspend fun setAiWakeName(name: String) {
         context.dataStore.edit { it[KEY_AI_WAKE_NAME] = name }
-    }
-
-    suspend fun setPreferredLanguage(lang: String) {
-        context.dataStore.edit { it[KEY_PREFERRED_LANG] = lang }
     }
 }

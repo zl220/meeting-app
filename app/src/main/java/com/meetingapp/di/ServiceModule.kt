@@ -35,13 +35,11 @@ object ServiceModule {
                 val participants = meetingRepo.getParticipants(meetingId)
                 val keywords = participants.map { it.name }
                 val prompt = meeting.agenda ?: meeting.title
-                val lang = settingsRepo.preferredLanguage.first()
                 transcriptionRepo.processChunk(
                     meetingId = meetingId,
                     chunk = chunk,
                     keywords = keywords,
-                    prompt = prompt,
-                    languages = listOf(lang)
+                    prompt = prompt
                 )
             } catch (e: Exception) {
                 Log.e("ChunkCallback", "Transcription failed for chunk ${chunk.file.name}", e)

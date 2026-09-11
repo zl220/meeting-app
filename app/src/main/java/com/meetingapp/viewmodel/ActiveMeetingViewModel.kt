@@ -322,8 +322,7 @@ class ActiveMeetingViewModel @Inject constructor(
             meetingId = meetingId,
             chunk = chunk,
             keywords = state.participants.map { it.name },
-            prompt = meeting.agenda ?: meeting.title,
-            languages = listOf("zh")
+            prompt = meeting.agenda ?: meeting.title
         )
     }
 

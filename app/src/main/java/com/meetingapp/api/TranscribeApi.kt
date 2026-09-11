@@ -8,7 +8,6 @@ interface TranscribeApi {
         meetingId: Long,
         chunkStartMs: Long,
         keywords: List<String>,
-        prompt: String,
-        languages: List<String>
+        prompt: String
     ): List<Segment>
 }

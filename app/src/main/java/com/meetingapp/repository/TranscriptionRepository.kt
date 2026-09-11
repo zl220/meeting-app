@@ -24,8 +24,7 @@ class TranscriptionRepository @Inject constructor(
         meetingId: Long,
         chunk: ChunkFile,
         keywords: List<String>,
-        prompt: String,
-        languages: List<String>
+        prompt: String
     ) {
         val chunkId = chunkDao.insert(
             AudioChunk(
@@ -41,8 +40,7 @@ class TranscriptionRepository @Inject constructor(
                 meetingId = meetingId,
                 chunkStartMs = chunk.startMs,
                 keywords = keywords,
-                prompt = prompt,
-                languages = languages
+                prompt = prompt
             )
             val filtered = segments.filter { !isWhisperHallucination(it.text) }
             Log.d("TranscriptionRepo", "Transcribed ${filtered.size}/${segments.size} segment(s) from ${chunk.file.name}")

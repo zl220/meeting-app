@@ -24,8 +24,7 @@ class OpenAiTranscribeApi @Inject constructor(
         meetingId: Long,
         chunkStartMs: Long,
         keywords: List<String>,
-        prompt: String,
-        languages: List<String>
+        prompt: String
     ): List<Segment> {
         val filePart = MultipartBody.Part.createFormData(
             "file", audioFile.name,
@@ -34,10 +33,8 @@ class OpenAiTranscribeApi @Inject constructor(
         val modelBody = Constants.MODEL_TRANSCRIBE.toRequestBody("text/plain".toMediaTypeOrNull())
         val formatBody = "verbose_json".toRequestBody("text/plain".toMediaTypeOrNull())
 
-        // Only pass language if non-blank; empty string causes API 400
-        val langBody = languages.firstOrNull()
-            ?.takeIf { it.isNotBlank() }
-            ?.toRequestBody("text/plain".toMediaTypeOrNull())
+        // No language param: let Whisper auto-detect. Handles mostly-Chinese meetings
+        // that occasionally drop in English words or technical terms.
 
         // Merge keywords into the prompt so Whisper knows the vocabulary
         val fullPrompt = buildString {
@@ -56,7 +53,7 @@ class OpenAiTranscribeApi @Inject constructor(
             file = filePart,
             model = modelBody,
             responseFormat = formatBody,
-            language = langBody,
+            language = null,
             prompt = fullPrompt
         )
 

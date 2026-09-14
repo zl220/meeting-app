@@ -52,4 +52,17 @@ object Constants {
 
     // On-disk voice-reference clips, promoted to a named sample when the user assigns a name.
     const val VOICE_SAMPLE_DIR = "voice_samples"
+
+    // Unnamed voice clips captured in-meeting for anonymous speakers. Stored in their OWN dir
+    // (not under the meeting audio dir) so they survive meeting-audio cleanup, and kept in the
+    // pending_voice_samples table. Swept only once older than the retention window below,
+    // regardless of whether the meeting audio is gone — giving the user 30 days to name them.
+    const val PENDING_VOICE_SAMPLE_DIR = "pending_voice_samples"
+    const val PENDING_VOICE_RETENTION_DAYS = 30
+
+    // Voice-sample quality score (0..1): how good a clip is as a diarization reference.
+    // Favors clips near the max length with mid-range energy (real speech, not silence/clipping).
+    // Ideal RMS band for 16-bit speech; energy far outside it scores lower.
+    const val VOICE_RMS_IDEAL_MIN = 500.0
+    const val VOICE_RMS_IDEAL_MAX = 6_000.0
 }

@@ -68,6 +68,26 @@ class MinutesRepository @Inject constructor(
         return minutes.copy(id = id)
     }
 
+    /**
+     * Re-generate the finalized minutes from the (now updated) transcript — used after the user
+     * names a diarized speaker, so the whole minutes reflects the corrected who-said-what. Updates
+     * the existing finalized row in place if present (no duplicate rows), else inserts one.
+     * Returns the refreshed minutes.
+     */
+    suspend fun regenerateFinalized(meeting: Meeting, allSegments: List<Segment>): Minutes {
+        val content = generator.generate(meeting.title, meeting.agenda, allSegments)
+        val existing = dao.getFinalized(meeting.id)
+        return if (existing != null) {
+            dao.updateContent(existing.id, content)
+            existing.copy(content = content, isEdited = true)
+        } else {
+            dao.clearDraftFlag(meeting.id)
+            val minutes = Minutes(meetingId = meeting.id, content = content, isDraft = false)
+            val id = dao.insert(minutes)
+            minutes.copy(id = id)
+        }
+    }
+
     suspend fun updateContent(id: Long, content: String) = dao.updateContent(id, content)
 
     suspend fun saveToDrive(meeting: Meeting, minutes: Minutes): String {

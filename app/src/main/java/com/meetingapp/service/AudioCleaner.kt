@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import com.meetingapp.data.db.dao.AudioChunkDao
 import com.meetingapp.data.db.dao.MeetingDao
+import com.meetingapp.repository.DiarizationRepository
 import com.meetingapp.util.Constants
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.CoroutineScope
@@ -24,7 +25,8 @@ import javax.inject.Singleton
 class AudioCleaner @Inject constructor(
     @ApplicationContext private val context: Context,
     private val meetingDao: MeetingDao,
-    private val audioChunkDao: AudioChunkDao
+    private val audioChunkDao: AudioChunkDao,
+    private val diarizationRepo: DiarizationRepository
 ) {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
@@ -53,6 +55,13 @@ class AudioCleaner @Inject constructor(
 
         // Drop the AudioChunk rows for those meetings (their WAVs are gone).
         audioChunkDao.deleteOlderThan(cutoffMs)
+
+        // Sweep unnamed voice clips past their own retention window (independent of meeting
+        // audio, so the user keeps ~30 days to name a speaker even after the recording is gone).
+        // Named voice-library samples are never swept.
+        val voiceCutoffMs = System.currentTimeMillis() -
+            TimeUnit.DAYS.toMillis(Constants.PENDING_VOICE_RETENTION_DAYS.toLong())
+        diarizationRepo.sweepExpiredPending(voiceCutoffMs)
 
         // Belt and suspenders: remove any orphaned audio dirs with no meeting row at all.
         audioRoot.listFiles()?.forEach { dir ->

@@ -105,28 +105,45 @@ class MinutesReviewViewModel @Inject constructor(
     }
 
     /**
-     * Name a previously-anonymous diarized speaker (发言人A/…). Resolves/creates the participant,
-     * relabels all their segments to the real name, and promotes their captured clip into the
-     * voice library so they auto-identify in future meetings. Removes the label from the pending
-     * list; the minutes text itself is left to the user's existing {{name:}} edits.
+     * Name a previously-anonymous diarized speaker (发言人A/…). This is a single action that:
+     *  1. resolves/creates the participant,
+     *  2. relabels ALL of that speaker's segments in this meeting to the real name,
+     *  3. promotes ALL their captured clips into the voice library (best-scored one wins as the
+     *     future reference), so they auto-identify next time,
+     *  4. regenerates the finalized minutes from the corrected transcript, so every place that
+     *     speaker appears is updated at once — not just the one line the user tapped.
      */
     fun assignSpeakerToLabel(label: String, name: String) {
         val trimmed = name.trim()
         if (trimmed.isBlank()) return
         viewModelScope.launch {
+            val meeting = uiState.value.meeting ?: return@launch
+            uiState.update { it.copy(isGenerating = true, error = null) }
             try {
+                // 1–3: participant, relabel segments, grow the voice library.
                 val participant = meetingRepo.resolveOrCreateParticipant(meetingId, trimmed, label)
                 transcriptionRepo.assignSpeakerName(meetingId, label, trimmed)
-                diarizationRepo.promoteAnonClipToSample(meetingId, label, participant.id)
+                diarizationRepo.promoteSpeakerToVoiceLibrary(meetingId, label, participant.id)
+
+                // 4: regenerate the minutes from the now-corrected transcript so the whole
+                // document reflects the named speaker.
+                val segments = transcriptionRepo.getAllSegmentsOnce(meetingId)
+                val refreshed = minutesRepo.regenerateFinalized(meeting, segments)
+
                 uiState.update { st ->
+                    val userEdited = st.minutes != null && st.editedContent != st.minutes.content
                     st.copy(
+                        isGenerating = false,
+                        minutes = refreshed,
+                        // Don't clobber in-progress manual edits; otherwise show the refreshed minutes.
+                        editedContent = if (userEdited) st.editedContent else refreshed.content,
                         unnamedSpeakerLabels = st.unnamedSpeakerLabels.filterNot { it == label },
                         participants = if (st.participants.any { it.id == participant.id }) st.participants
                                        else st.participants + participant
                     )
                 }
             } catch (e: Exception) {
-                uiState.update { it.copy(error = "标注发言人失败：${e.message}") }
+                uiState.update { it.copy(isGenerating = false, error = "标注发言人失败：${e.message}") }
             }
         }
     }

@@ -35,5 +35,43 @@ object Migrations {
         }
     }
 
-    val ALL = arrayOf(MIGRATION_3_4)
+    /**
+     * v4 → v5: grow the voice library.
+     *  - `voice_samples`: add `qualityScore`; allow multiple samples per participant (swap the
+     *    UNIQUE index on participantId for a plain one).
+     *  - add `pending_voice_samples` for unnamed in-meeting clips (kept up to the retention window).
+     */
+    val MIGRATION_4_5 = object : Migration(4, 5) {
+        override fun migrate(db: SupportSQLiteDatabase) {
+            // qualityScore on existing named samples (default 0 = unknown/lowest).
+            db.execSQL("ALTER TABLE `voice_samples` ADD COLUMN `qualityScore` REAL NOT NULL DEFAULT 0")
+            // Drop the unique index and recreate as non-unique so a participant may keep many clips.
+            db.execSQL("DROP INDEX IF EXISTS `index_voice_samples_participantId`")
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_voice_samples_participantId` " +
+                    "ON `voice_samples` (`participantId`)"
+            )
+            db.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `pending_voice_samples` (
+                    `id` INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+                    `meetingId` INTEGER NOT NULL,
+                    `speakerLabel` TEXT NOT NULL,
+                    `filePath` TEXT NOT NULL,
+                    `durationMs` INTEGER NOT NULL,
+                    `qualityScore` REAL NOT NULL,
+                    `capturedAt` INTEGER NOT NULL,
+                    FOREIGN KEY(`meetingId`) REFERENCES `meetings`(`id`)
+                        ON UPDATE NO ACTION ON DELETE CASCADE
+                )
+                """.trimIndent()
+            )
+            db.execSQL(
+                "CREATE INDEX IF NOT EXISTS `index_pending_voice_samples_meetingId_speakerLabel` " +
+                    "ON `pending_voice_samples` (`meetingId`, `speakerLabel`)"
+            )
+        }
+    }
+
+    val ALL = arrayOf(MIGRATION_3_4, MIGRATION_4_5)
 }

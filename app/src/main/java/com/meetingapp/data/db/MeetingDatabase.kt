@@ -7,8 +7,9 @@ import com.meetingapp.data.db.entity.*
 
 @Database(
     entities = [Participant::class, Meeting::class, MeetingParticipant::class,
-        Segment::class, Minutes::class, AudioChunk::class, VoiceSample::class],
-    version = 4,
+        Segment::class, Minutes::class, AudioChunk::class, VoiceSample::class,
+        PendingVoiceSample::class],
+    version = 5,
     exportSchema = false
 )
 abstract class MeetingDatabase : RoomDatabase() {
@@ -18,4 +19,5 @@ abstract class MeetingDatabase : RoomDatabase() {
     abstract fun minutesDao(): MinutesDao
     abstract fun audioChunkDao(): AudioChunkDao
     abstract fun voiceSampleDao(): VoiceSampleDao
+    abstract fun pendingVoiceSampleDao(): PendingVoiceSampleDao
 }

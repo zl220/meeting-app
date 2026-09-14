@@ -39,6 +39,7 @@ object AppModule {
     @Provides fun provideMinutesDao(db: MeetingDatabase) = db.minutesDao()
     @Provides fun provideAudioChunkDao(db: MeetingDatabase) = db.audioChunkDao()
     @Provides fun provideVoiceSampleDao(db: MeetingDatabase) = db.voiceSampleDao()
+    @Provides fun providePendingVoiceSampleDao(db: MeetingDatabase) = db.pendingVoiceSampleDao()
 
     @Provides
     @Singleton

@@ -13,17 +13,30 @@ data class NamedVoiceSample(
 
 @Dao
 interface VoiceSampleDao {
-    /** Newest-first so callers can take the top-N most-recently-refreshed voices. */
+    /**
+     * The single best-quality sample per participant, paired with the participant. Used to build
+     * the ≤4 known-speaker references — a participant with several clips contributes only their
+     * strongest one, so a weak clip never displaces a good reference.
+     */
     @Transaction
-    @Query("SELECT * FROM voice_samples ORDER BY capturedAt DESC")
-    suspend fun getAllNamed(): List<NamedVoiceSample>
+    @Query(
+        """
+        SELECT vs.* FROM voice_samples vs
+        WHERE vs.id = (
+            SELECT id FROM voice_samples
+            WHERE participantId = vs.participantId
+            ORDER BY qualityScore DESC, capturedAt DESC
+            LIMIT 1
+        )
+        """
+    )
+    suspend fun getBestPerParticipant(): List<NamedVoiceSample>
 
-    @Query("SELECT * FROM voice_samples WHERE participantId = :participantId")
-    suspend fun getForParticipant(participantId: Long): VoiceSample?
+    @Query("SELECT * FROM voice_samples WHERE participantId = :participantId ORDER BY qualityScore DESC")
+    suspend fun getForParticipant(participantId: Long): List<VoiceSample>
 
-    /** One sample per participant (unique index); replace refreshes the voice. */
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun upsert(sample: VoiceSample): Long
+    @Insert
+    suspend fun insert(sample: VoiceSample): Long
 
     @Query("DELETE FROM voice_samples WHERE participantId = :participantId")
     suspend fun deleteForParticipant(participantId: Long)

@@ -15,12 +15,15 @@ object WavClip {
 
     private const val HEADER_BYTES = 44
 
+    /** Result of extracting a voice clip: its duration and 0..1 reference quality. */
+    data class Clip(val durationMs: Long, val qualityScore: Double)
+
     /**
      * Extract [fromMs, toMs) (relative to the file's audio start) into [dest], clamped to
-     * [Constants.VOICE_SAMPLE_MIN_MS]..[Constants.VOICE_SAMPLE_MAX_MS]. Returns the actual
-     * clip duration in ms, or null if the source is too short/invalid.
+     * [Constants.VOICE_SAMPLE_MIN_MS]..[Constants.VOICE_SAMPLE_MAX_MS]. Returns the clip's
+     * duration + quality score, or null if the source is too short/invalid.
      */
-    fun extract(source: File, fromMs: Long, toMs: Long, dest: File): Long? {
+    fun extract(source: File, fromMs: Long, toMs: Long, dest: File): Clip? {
         if (!source.exists() || source.length() <= HEADER_BYTES) return null
         val allPcm = try {
             val bytes = source.readBytes()
@@ -51,7 +54,42 @@ object WavClip {
             fos.write(buildWavHeader(clip.size, clip.size + 36))
             fos.write(clip)
         }
-        return bytesToMs(clip.size.toLong())
+        val durMs = bytesToMs(clip.size.toLong())
+        return Clip(durMs, qualityScore(clip, durMs))
+    }
+
+    /**
+     * Score a clip 0..1 as a diarization reference: longer (up to the max) is better, and RMS
+     * energy inside the ideal speech band (see VOICE_RMS_IDEAL_MIN/MAX) is better than silence
+     * (too quiet) or clipping/noise (too loud). Equal weight to length and energy.
+     */
+    private fun qualityScore(pcm: ByteArray, durMs: Long): Double {
+        val lengthScore = (durMs.toDouble() / Constants.VOICE_SAMPLE_MAX_MS).coerceIn(0.0, 1.0)
+        val energyScore = energyScore(rms(pcm))
+        return (lengthScore + energyScore) / 2.0
+    }
+
+    private fun rms(pcm: ByteArray): Double {
+        if (pcm.size < 2) return 0.0
+        var sumSq = 0.0
+        var i = 0
+        while (i + 1 < pcm.size) {
+            val sample = (pcm[i].toInt() and 0xFF) or (pcm[i + 1].toInt() shl 8)
+            sumSq += sample * sample.toDouble()
+            i += 2
+        }
+        return Math.sqrt(sumSq / (pcm.size / 2))
+    }
+
+    /** 1.0 when RMS is within the ideal speech band, tapering to 0 outside it. */
+    private fun energyScore(rms: Double): Double {
+        val lo = Constants.VOICE_RMS_IDEAL_MIN
+        val hi = Constants.VOICE_RMS_IDEAL_MAX
+        return when {
+            rms in lo..hi -> 1.0
+            rms < lo -> (rms / lo).coerceIn(0.0, 1.0)              // too quiet
+            else -> (hi / rms).coerceIn(0.0, 1.0)                 // too loud / clipping
+        }
     }
 
     private fun buildWavHeader(pcmSize: Int, totalDataLen: Int): ByteArray {

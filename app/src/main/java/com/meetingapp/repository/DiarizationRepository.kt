@@ -5,8 +5,10 @@ import android.util.Log
 import com.meetingapp.api.DiarizeApi
 import com.meetingapp.api.KnownSpeaker
 import com.meetingapp.api.SpeakerTurn
+import com.meetingapp.data.db.dao.PendingVoiceSampleDao
 import com.meetingapp.data.db.dao.SegmentDao
 import com.meetingapp.data.db.dao.VoiceSampleDao
+import com.meetingapp.data.db.entity.PendingVoiceSample
 import com.meetingapp.data.db.entity.VoiceSample
 import com.meetingapp.service.WavClip
 import com.meetingapp.service.WindowFile
@@ -18,15 +20,15 @@ import javax.inject.Singleton
 
 /**
  * In-meeting incremental diarization (see plan). For each ~5-minute window:
- *  1. build ≤4 known-voice references from participants who have a stored [VoiceSample],
+ *  1. build ≤4 known-voice references from participants who have a stored [VoiceSample]
+ *     (best-scored clip per person),
  *  2. run gpt-4o-transcribe-diarize on the window,
  *  3. FUSE the result onto the live whisper segments — backfilling speakerName/speakerLabel by
  *     time overlap WITHOUT touching text, so the on-screen transcript never jumps,
- *  4. stash a short clip per anonymous speaker so the user can name them after the meeting and
- *     grow the voice library.
+ *  4. capture scored clips for each anonymous speaker into the pending voice table so the user
+ *     can name them later (kept up to the retention window) and grow the voice library.
  *
- * Best-effort throughout: any failure logs and returns; the live transcript is unaffected and
- * the post-meeting finalize re-runs on the full recording as a backstop.
+ * Best-effort throughout: any failure logs and returns; the live transcript is unaffected.
  */
 @Singleton
 class DiarizationRepository @Inject constructor(
@@ -34,6 +36,7 @@ class DiarizationRepository @Inject constructor(
     private val diarizeApi: DiarizeApi,
     private val segmentDao: SegmentDao,
     private val voiceSampleDao: VoiceSampleDao,
+    private val pendingVoiceSampleDao: PendingVoiceSampleDao,
     private val meetingRepo: MeetingRepository
 ) {
     /** Diarize one window and fuse the result onto the meeting's live segments. */
@@ -59,15 +62,16 @@ class DiarizationRepository @Inject constructor(
     }
 
     /**
-     * Pick up to 4 participants who both attend this meeting and have a stored voice sample,
-     * most-recently-refreshed first (proxy for "high-frequency / most relevant"). This is the
-     * degrade path for meetings with >4 known people: only these get auto-named this run.
+     * Pick up to 4 attendees who have a stored voice sample, contributing each person's
+     * best-scored clip. Ordered by that clip's quality so the strongest references win the
+     * limited 4 slots (degrade path for meetings with >4 known people).
      */
     private suspend fun buildKnownSpeakers(meetingId: Long): List<KnownSpeaker> {
         val attendeeIds = meetingRepo.getParticipants(meetingId).map { it.id }.toSet()
         if (attendeeIds.isEmpty()) return emptyList()
-        return voiceSampleDao.getAllNamed()                       // newest-first
+        return voiceSampleDao.getBestPerParticipant()
             .filter { it.participant.id in attendeeIds }
+            .sortedByDescending { it.sample.qualityScore }
             .map { KnownSpeaker(it.participant.name, File(it.sample.filePath)) }
             .filter { it.sample.exists() }
             .take(Constants.DIARIZE_MAX_KNOWN_SPEAKERS)
@@ -75,7 +79,7 @@ class DiarizationRepository @Inject constructor(
 
     /**
      * Backfill each diarized turn onto the overlapping live segments and, for anonymous
-     * speakers, capture a representative clip for later naming.
+     * speakers, capture a scored clip into the pending voice table for later naming.
      */
     private suspend fun fuse(meetingId: Long, window: WindowFile, turns: List<SpeakerTurn>) {
         // Anonymous speakers within THIS window get stable "发言人A/B/…" labels, grouped by the
@@ -90,7 +94,6 @@ class DiarizationRepository @Inject constructor(
                 label = turn.knownName          // real name matched a known reference
                 name = turn.knownName
             } else {
-                // Group by raw code so the same anonymous speaker in this window shares one label.
                 val code = turn.rawCode ?: "?"
                 label = anonCodeToLabel.getOrPut(code) {
                     Constants.SPEAKER_LABEL_ANON_PREFIX + ('A' + anonCodeToLabel.size)
@@ -115,70 +118,89 @@ class DiarizationRepository @Inject constructor(
     }
 
     /**
-     * Save one 2–10s clip per anonymous label per meeting (first occurrence wins) so the user
-     * can name it in review. Kept out of the DB (no participant yet) as a plain file; promoted
-     * to a [VoiceSample] by [promoteAnonClipToSample] when named.
+     * Capture a scored voice clip for an anonymous speaker turn into the pending table. Multiple
+     * clips per (meeting, label) accumulate so the best one can later be promoted; a small cap
+     * per speaker avoids unbounded growth on a long meeting.
      */
-    private fun capturePendingClip(
+    private suspend fun capturePendingClip(
         meetingId: Long,
         window: WindowFile,
         turn: SpeakerTurn,
         label: String
     ) {
-        val dest = pendingClipFile(meetingId, label)
-        if (dest.exists()) return   // already have a sample for this anon speaker
-        dest.parentFile?.mkdirs()
-        // Convert meeting-absolute turn ms back to window-file-relative ms.
+        val existing = pendingVoiceSampleDao.getForSpeaker(meetingId, label)
+        if (existing.size >= MAX_PENDING_PER_SPEAKER) return
+
+        val dir = File(context.filesDir, Constants.PENDING_VOICE_SAMPLE_DIR).also { it.mkdirs() }
+        val safe = label.replace(Regex("[^\\p{L}\\p{N}]"), "_")
+        val dest = File(dir, "pending_${meetingId}_${safe}_${window.startMs + turn.startMs}.wav")
+
         val fromMs = (turn.startMs - window.startMs).coerceAtLeast(0)
         val toMs = (turn.endMs - window.startMs).coerceAtLeast(fromMs)
-        WavClip.extract(window.file, fromMs, toMs, dest)
-    }
-
-    /**
-     * Promote a captured anonymous clip into a named [VoiceSample] when the user assigns a name
-     * after the meeting. No-op if there's no pending clip for that label. Returns true on success.
-     */
-    suspend fun promoteAnonClipToSample(meetingId: Long, label: String, participantId: Long): Boolean {
-        val pending = pendingClipFile(meetingId, label)
-        if (!pending.exists()) return false
-        val samplesDir = File(context.filesDir, Constants.VOICE_SAMPLE_DIR).also { it.mkdirs() }
-        val dest = File(samplesDir, "voice_${participantId}.wav")
-        return try {
-            pending.copyTo(dest, overwrite = true)
-            val durMs = wavDurationMs(dest)
-            voiceSampleDao.upsert(
-                VoiceSample(participantId = participantId, filePath = dest.absolutePath, durationMs = durMs)
+        val clip = WavClip.extract(window.file, fromMs, toMs, dest) ?: return
+        pendingVoiceSampleDao.insert(
+            PendingVoiceSample(
+                meetingId = meetingId,
+                speakerLabel = label,
+                filePath = dest.absolutePath,
+                durationMs = clip.durationMs,
+                qualityScore = clip.qualityScore
             )
-            true
-        } catch (e: Exception) {
-            Log.e("DiarizationRepo", "promote clip failed", e)
-            false
-        }
+        )
     }
 
     /**
-     * Anonymous speaker labels (发言人A/B/…) captured for this meeting that still await a name.
-     * Surfaced in the review screen so the user can name them and grow the voice library.
+     * Promote a named speaker's captured clips into the participant's voice library. All pending
+     * clips for (meetingId, label) become [VoiceSample]s; the best-scored one is what future
+     * meetings will use as the reference. Clears the pending rows. Returns the number promoted.
      */
-    fun pendingAnonLabels(meetingId: Long): List<String> {
-        val dir = File(context.filesDir, "audio/$meetingId")
-        val files = dir.listFiles { f -> f.name.startsWith("pending_voice_") } ?: return emptyList()
-        val prefix = Constants.SPEAKER_LABEL_ANON_PREFIX
-        return files.mapNotNull { f ->
-            // pending_voice_发言人A.wav → 发言人A (sanitizer keeps letters/digits intact)
-            f.name.removePrefix("pending_voice_").removeSuffix(".wav")
-                .takeIf { it.startsWith(prefix) }
-        }.sorted()
+    suspend fun promoteSpeakerToVoiceLibrary(meetingId: Long, label: String, participantId: Long): Int {
+        val pending = pendingVoiceSampleDao.getForSpeaker(meetingId, label)
+        if (pending.isEmpty()) return 0
+        val samplesDir = File(context.filesDir, Constants.VOICE_SAMPLE_DIR).also { it.mkdirs() }
+        var promoted = 0
+        pending.forEach { p ->
+            val src = File(p.filePath)
+            if (!src.exists()) return@forEach
+            val dest = File(samplesDir, "voice_${participantId}_${p.id}.wav")
+            runCatching {
+                src.copyTo(dest, overwrite = true)
+                voiceSampleDao.insert(
+                    VoiceSample(
+                        participantId = participantId,
+                        filePath = dest.absolutePath,
+                        durationMs = p.durationMs,
+                        qualityScore = p.qualityScore
+                    )
+                )
+                promoted++
+            }.onFailure { Log.e("DiarizationRepo", "promote clip ${p.id} failed", it) }
+        }
+        // Clear pending rows + their files now that they're promoted.
+        pending.forEach { runCatching { File(it.filePath).delete() } }
+        pendingVoiceSampleDao.deleteForSpeaker(meetingId, label)
+        Log.d("DiarizationRepo", "Promoted $promoted clip(s) for '$label' → participant $participantId")
+        return promoted
     }
 
-    private fun pendingClipFile(meetingId: Long, label: String): File {
-        // Sanitize the label for a filename (anon labels like "发言人A" are safe, but be defensive).
-        val safe = label.replace(Regex("[^\\p{L}\\p{N}]"), "_")
-        return File(context.filesDir, "audio/$meetingId/pending_voice_$safe.wav")
+    /** Anonymous speaker labels (发言人A/…) still awaiting a name in this meeting. */
+    suspend fun pendingAnonLabels(meetingId: Long): List<String> =
+        pendingVoiceSampleDao.getPendingLabels(meetingId)
+
+    /**
+     * Delete unnamed pending voice clips older than the retention window (files + rows). Named
+     * [VoiceSample]s are never touched. Called from the periodic audio sweep.
+     */
+    suspend fun sweepExpiredPending(cutoffMs: Long) {
+        val expired = pendingVoiceSampleDao.getOlderThan(cutoffMs)
+        if (expired.isEmpty()) return
+        expired.forEach { runCatching { File(it.filePath).delete() } }
+        pendingVoiceSampleDao.deleteOlderThan(cutoffMs)
+        Log.d("DiarizationRepo", "Swept ${expired.size} expired pending voice sample(s)")
     }
 
-    private fun wavDurationMs(file: File): Long {
-        val pcmBytes = (file.length() - 44).coerceAtLeast(0)
-        return pcmBytes / (Constants.SAMPLE_RATE_HZ * 2L / 1000)
+    private companion object {
+        // Cap clips kept per anonymous speaker per meeting; the best is promoted on naming.
+        const val MAX_PENDING_PER_SPEAKER = 5
     }
 }

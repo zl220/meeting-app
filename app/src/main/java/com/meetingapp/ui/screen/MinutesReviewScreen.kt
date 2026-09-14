@@ -36,6 +36,8 @@ fun MinutesReviewScreen(
     val context = LocalContext.current
     // Which speaker marker the user is assigning/editing (its occurrence index + current name), or null.
     var assigning by remember { mutableStateOf<SpeakerTarget?>(null) }
+    // Which anonymous diarized speaker label (发言人A/…) the user is naming, or null.
+    var namingLabel by remember { mutableStateOf<String?>(null) }
 
     LaunchedEffect(meetingId) { vm.load(meetingId) }
 
@@ -149,6 +151,31 @@ fun MinutesReviewScreen(
                 }
             }
 
+            // Unnamed diarized speakers: name them to add their voice to the library so they
+            // auto-identify next time. Only shown when the diarization pass left anonymous speakers.
+            if (state.unnamedSpeakerLabels.isNotEmpty()) {
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant,
+                    shape = MaterialTheme.shapes.medium,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp)
+                ) {
+                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text("识别到的发言人", style = MaterialTheme.typography.titleSmall)
+                        Text(
+                            "标注这些发言人可将其声音加入声纹库，下次开会自动识别。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                        state.unnamedSpeakerLabels.forEach { label ->
+                            OutlinedButton(
+                                onClick = { namingLabel = label },
+                                modifier = Modifier.fillMaxWidth()
+                            ) { Text("标注「$label」") }
+                        }
+                    }
+                }
+            }
+
             // Action buttons row
             Row(
                 Modifier.fillMaxWidth().padding(horizontal = 16.dp),
@@ -202,6 +229,18 @@ fun MinutesReviewScreen(
                 assigning = null
             },
             onDismiss = { assigning = null }
+        )
+    }
+
+    namingLabel?.let { label ->
+        AssignNameDialog(
+            participants = state.participants.map { it.name },
+            currentName = null,
+            onPick = { name ->
+                vm.assignSpeakerToLabel(label, name)
+                namingLabel = null
+            },
+            onDismiss = { namingLabel = null }
         )
     }
 }

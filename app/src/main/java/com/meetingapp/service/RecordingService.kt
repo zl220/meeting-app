@@ -29,12 +29,14 @@ class RecordingService : Service() {
     }
 
     @Inject lateinit var chunkCallback: ChunkCallback
+    @Inject lateinit var windowCallback: WindowCallback
 
     private val binder = RecordingBinder()
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var audioRecord: AudioRecord? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var chunkWriter: AudioChunkWriter? = null
+    private var windowWriter: WindowWavWriter? = null
     private var fullAudioRecorder: FullAudioRecorder? = null
     private var fullAudioFile: File? = null
     private var meetingId: Long = -1
@@ -49,6 +51,11 @@ class RecordingService : Service() {
 
     interface ChunkCallback {
         suspend fun onChunkReady(meetingId: Long, chunk: ChunkFile)
+    }
+
+    /** Invoked when a ~5-minute diarization window is ready. Runs off the read loop. */
+    interface WindowCallback {
+        suspend fun onWindowReady(meetingId: Long, window: WindowFile)
     }
 
     override fun onBind(intent: Intent): IBinder = binder
@@ -101,6 +108,8 @@ class RecordingService : Service() {
 
         val audioDir = File(filesDir, "audio/$meetingId").also { it.mkdirs() }
         chunkWriter = AudioChunkWriter(audioDir).also { it.start() }
+        // ~5-minute windows for in-meeting diarization (runs alongside the 8s chunks).
+        windowWriter = WindowWavWriter(audioDir).also { it.start() }
         // Full continuous recording of the whole meeting (keeps silence).
         fullAudioFile = File(audioDir, "meeting_$meetingId.m4a")
         fullAudioRecorder = try {
@@ -120,6 +129,17 @@ class RecordingService : Service() {
                 chunkCallback.onChunkReady(meetingId, chunk)
             }
         }
+        // Separate coroutine for diarization windows; drops oldest if diarization lags so
+        // the read loop is never blocked (in-meeting diarization is best-effort).
+        val windowChannel = kotlinx.coroutines.channels.Channel<WindowFile>(
+            capacity = 2,
+            onBufferOverflow = kotlinx.coroutines.channels.BufferOverflow.DROP_OLDEST
+        )
+        scope.launch {
+            for (window in windowChannel) {
+                windowCallback.onWindowReady(meetingId, window)
+            }
+        }
 
         scope.launch {
             val readBuffer = ByteArray(bufferSize)
@@ -134,6 +154,7 @@ class RecordingService : Service() {
                     val writer = chunkWriter ?: break
                     val slice = readBuffer.copyOf(read)
                     writer.write(slice)
+                    windowWriter?.write(slice)
                     fullAudioRecorder?.write(slice)
                     // Update amplitude for waveform animation — boosted for visibility
                     _amplitude.value = (computeRms(slice) * 8f).coerceIn(0f, 1f)
@@ -142,9 +163,15 @@ class RecordingService : Service() {
                             chunkChannel.trySend(chunk)
                         }
                     }
+                    windowWriter?.let { w ->
+                        if (w.isWindowReady(slice)) {
+                            w.flushWindow()?.let { window -> windowChannel.trySend(window) }
+                        }
+                    }
                 }
             }
             chunkChannel.close()
+            windowChannel.close()
         }
     }
 
@@ -155,6 +182,9 @@ class RecordingService : Service() {
         audioRecord = null
         val finalChunk = chunkWriter?.flushChunk()
         chunkWriter = null
+        // Flush any remaining audio as a final diarization window before detaching.
+        finalWindow = windowWriter?.flushWindow()
+        windowWriter = null
         // Detach first so the read loop can't write to it while we finalize.
         val fullRecorder = fullAudioRecorder
         fullAudioRecorder = null
@@ -164,6 +194,10 @@ class RecordingService : Service() {
         stopSelf()
         return finalChunk
     }
+
+    /** The last diarization window flushed by [stopRecording], consumed once by the caller. */
+    private var finalWindow: WindowFile? = null
+    fun takeFinalWindow(): WindowFile? = finalWindow.also { finalWindow = null }
 
     /** Path of the full meeting recording, valid after [stopRecording]. Null if unavailable. */
     fun fullAudioFilePath(): String? =

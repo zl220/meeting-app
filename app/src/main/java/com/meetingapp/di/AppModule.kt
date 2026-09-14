@@ -5,6 +5,7 @@ import androidx.room.Room
 import com.meetingapp.BuildConfig
 import com.meetingapp.api.openai.OpenAiService
 import com.meetingapp.data.db.MeetingDatabase
+import com.meetingapp.data.db.Migrations
 import com.meetingapp.util.Constants
 import dagger.Module
 import dagger.Provides
@@ -29,6 +30,7 @@ object AppModule {
         // (register it via .addMigrations(...)) so users never lose stored meetings,
         // minutes, or recordings. A missing migration fails loudly at open time.
         Room.databaseBuilder(ctx, MeetingDatabase::class.java, "meeting_db")
+            .addMigrations(*Migrations.ALL)
             .build()
 
     @Provides fun provideParticipantDao(db: MeetingDatabase) = db.participantDao()
@@ -36,6 +38,7 @@ object AppModule {
     @Provides fun provideSegmentDao(db: MeetingDatabase) = db.segmentDao()
     @Provides fun provideMinutesDao(db: MeetingDatabase) = db.minutesDao()
     @Provides fun provideAudioChunkDao(db: MeetingDatabase) = db.audioChunkDao()
+    @Provides fun provideVoiceSampleDao(db: MeetingDatabase) = db.voiceSampleDao()
 
     @Provides
     @Singleton

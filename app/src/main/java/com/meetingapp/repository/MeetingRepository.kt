@@ -1,6 +1,7 @@
 package com.meetingapp.repository
 
 import com.meetingapp.data.db.dao.MeetingDao
+import com.meetingapp.data.db.dao.ParticipantDao
 import com.meetingapp.data.db.entity.Meeting
 import com.meetingapp.data.db.entity.MeetingParticipant
 import com.meetingapp.data.db.entity.Participant
@@ -10,7 +11,8 @@ import javax.inject.Singleton
 
 @Singleton
 class MeetingRepository @Inject constructor(
-    private val dao: MeetingDao
+    private val dao: MeetingDao,
+    private val participantDao: ParticipantDao
 ) {
     fun getAll(): Flow<List<Meeting>> = dao.getAll()
 
@@ -40,4 +42,22 @@ class MeetingRepository @Inject constructor(
 
     suspend fun assignSpeakerLabel(meetingId: Long, participantId: Long, label: String) =
         dao.updateSpeakerLabel(meetingId, participantId, label)
+
+    /**
+     * Find an existing participant by exact name, or create one. Used when a user names a
+     * previously-anonymous diarized speaker so their voice can be added to the library.
+     * Also links them to the meeting and records the speaker label.
+     */
+    suspend fun resolveOrCreateParticipant(meetingId: Long, name: String, label: String): Participant {
+        // Reuse a meeting attendee with this name if present; otherwise create a new participant.
+        val fromMeeting = getParticipants(meetingId).firstOrNull { it.name == name }
+        val participant = fromMeeting ?: run {
+            val id = participantDao.upsert(Participant(name = name, email = ""))
+            Participant(id = id, name = name, email = "")
+        }
+        dao.insertParticipantLink(MeetingParticipant(meetingId, participant.id))
+        dao.updateSpeakerLabel(meetingId, participant.id, label)
+        participantDao.touchLastUsed(participant.id)
+        return participant
+    }
 }

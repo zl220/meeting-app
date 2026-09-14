@@ -13,6 +13,7 @@ import com.meetingapp.api.openai.OpenAiTtsPlayer
 import com.meetingapp.data.db.entity.Meeting
 import com.meetingapp.data.db.entity.Participant
 import com.meetingapp.data.db.entity.Segment
+import com.meetingapp.repository.DiarizationRepository
 import com.meetingapp.repository.MeetingRepository
 import com.meetingapp.repository.MinutesRepository
 import com.meetingapp.repository.SettingsRepository
@@ -64,6 +65,7 @@ class ActiveMeetingViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
     private val meetingRepo: MeetingRepository,
     private val transcriptionRepo: TranscriptionRepository,
+    private val diarizationRepo: DiarizationRepository,
     private val minutesRepo: MinutesRepository,
     private val settingsRepo: SettingsRepository,
     private val askAiApi: AskAiApi,
@@ -190,10 +192,15 @@ class ActiveMeetingViewModel @Inject constructor(
     suspend fun stopMeetingAndFinish() {
         timerJob?.cancel()
         val finalChunk = recordingService?.stopRecording()
-        // Read the full-recording path before unbinding drops the service reference.
+        // Read the full-recording path and the trailing diarization window before unbinding
+        // drops the service reference.
         val audioPath = recordingService?.fullAudioFilePath()
+        val finalWindow = recordingService?.takeFinalWindow()
         try { context.unbindService(serviceConnection) } catch (_: Exception) {}
         finalChunk?.let { processChunk(it) }
+        // Diarize the last window so its speakers are backfilled before minutes finalize.
+        // Best-effort: swallow failures so meeting completion is never blocked.
+        finalWindow?.let { runCatching { diarizationRepo.processWindow(meetingId, it) } }
         meetingRepo.setFinished(meetingId)
         meetingRepo.setAudioFilePath(meetingId, audioPath)
     }

@@ -2,10 +2,12 @@ package com.meetingapp.di
 
 import android.content.Context
 import com.meetingapp.api.AskAiApi
+import com.meetingapp.api.DiarizeApi
 import com.meetingapp.api.SaveMinutesApi
 import com.meetingapp.api.TranscribeApi
 import com.meetingapp.api.impl.DriveMinutesApi
 import com.meetingapp.api.openai.OpenAiAskApi
+import com.meetingapp.api.openai.OpenAiDiarizeApi
 import com.meetingapp.api.openai.OpenAiService
 import com.meetingapp.api.openai.OpenAiTranscribeApi
 import com.meetingapp.api.openai.OpenAiTtsPlayer
@@ -46,6 +48,13 @@ object ApiModule {
         service: OpenAiService,
         @Named("openai_api_key_flow") apiKeyFlow: Flow<String>
     ): AskAiApi = OpenAiAskApi(service, apiKeyFlow)
+
+    @Provides
+    @Singleton
+    fun provideDiarizeApi(
+        service: OpenAiService,
+        @Named("openai_api_key_flow") apiKeyFlow: Flow<String>
+    ): DiarizeApi = OpenAiDiarizeApi(service, apiKeyFlow)
 
     @Provides
     @Singleton

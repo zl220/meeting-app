@@ -28,4 +28,28 @@ object Constants {
     const val MODEL_CHAT = "gpt-4o"
     const val MODEL_TTS = "tts-1"
     const val TTS_VOICE = "nova"
+
+    // --- Speaker diarization (gpt-4o-transcribe-diarize) ---
+    // Specialized speaker-labeling model. Runs in-meeting on ~5-minute windows (NOT the
+    // realtime path — diarization is only offered on /v1/audio/transcriptions) to backfill
+    // "who said what" onto the live whisper segments. See plan for rationale.
+    const val MODEL_TRANSCRIBE_DIARIZE = "gpt-4o-transcribe-diarize"
+
+    // In-meeting incremental diarization window. Each window is an independent file sent to
+    // the diarize model; anonymous speaker codes do NOT carry across windows — only the ≤4
+    // known-voice references keep a stable real name across windows.
+    const val DIARIZE_WINDOW_MS = 5 * 60_000L        // ~5-minute windows
+    const val DIARIZE_WINDOW_OVERLAP_MS = 15_000L    // small overlap to avoid cutting mid-turn
+
+    // OpenAI hard limit: at most 4 known-speaker references, each 2–10s of audio.
+    const val DIARIZE_MAX_KNOWN_SPEAKERS = 4
+    const val VOICE_SAMPLE_MIN_MS = 2_000L
+    const val VOICE_SAMPLE_MAX_MS = 10_000L
+
+    // Prefix for anonymous diarized speakers that could NOT be mapped to a known voice.
+    // e.g. the model's "speaker A" becomes label "发言人A" in our segments.
+    const val SPEAKER_LABEL_ANON_PREFIX = "发言人"
+
+    // On-disk voice-reference clips, promoted to a named sample when the user assigns a name.
+    const val VOICE_SAMPLE_DIR = "voice_samples"
 }

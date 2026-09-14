@@ -25,6 +25,22 @@ data class TranscriptionSegment(
     val speaker: String? = null
 )
 
+// --- Diarization (gpt-4o-transcribe-diarize, response_format=diarized_json) ---
+// Returns per-turn segments carrying a `speaker` (real name when a known reference matched,
+// otherwise an anonymous code like "A"/"B"), plus start/end seconds and the turn text.
+
+data class DiarizedResponse(
+    val text: String? = null,
+    val segments: List<DiarizedSegment>? = null
+)
+
+data class DiarizedSegment(
+    val speaker: String? = null,
+    val start: Double = 0.0,
+    val end: Double = 0.0,
+    val text: String = ""
+)
+
 // --- Chat ---
 
 data class ChatRequest(

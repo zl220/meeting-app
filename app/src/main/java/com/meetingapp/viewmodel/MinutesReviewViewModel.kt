@@ -6,6 +6,7 @@ import com.meetingapp.data.db.entity.Meeting
 import com.meetingapp.data.db.entity.Minutes
 import com.meetingapp.data.db.entity.Participant
 import com.meetingapp.data.db.entity.Segment
+import com.meetingapp.repository.DiarizationRepository
 import com.meetingapp.repository.MeetingRepository
 import com.meetingapp.repository.MinutesRepository
 import com.meetingapp.repository.TranscriptionRepository
@@ -20,6 +21,9 @@ data class MinutesReviewUiState(
     val participants: List<Participant> = emptyList(),
     val minutes: Minutes? = null,
     val editedContent: String = "",
+    // Anonymous diarized speakers (发言人A/B/…) with a captured clip, awaiting a name.
+    // Naming one adds their voice to the library so they auto-identify next time.
+    val unnamedSpeakerLabels: List<String> = emptyList(),
     val isGenerating: Boolean = false,
     val isSaving: Boolean = false,
     val savedToDrive: Boolean = false,
@@ -32,7 +36,8 @@ data class MinutesReviewUiState(
 class MinutesReviewViewModel @Inject constructor(
     private val meetingRepo: MeetingRepository,
     private val minutesRepo: MinutesRepository,
-    private val transcriptionRepo: TranscriptionRepository
+    private val transcriptionRepo: TranscriptionRepository,
+    private val diarizationRepo: DiarizationRepository
 ) : ViewModel() {
 
     val uiState = MutableStateFlow(MinutesReviewUiState())
@@ -46,7 +51,11 @@ class MinutesReviewViewModel @Inject constructor(
             val segments = transcriptionRepo.getAllSegmentsOnce(id)
 
             uiState.update {
-                it.copy(meeting = meeting, participants = participants)
+                it.copy(
+                    meeting = meeting,
+                    participants = participants,
+                    unnamedSpeakerLabels = diarizationRepo.pendingAnonLabels(id)
+                )
             }
             generateMinutes(meeting, segments)
         }
@@ -92,6 +101,33 @@ class MinutesReviewViewModel @Inject constructor(
                 minutes = minutes,
                 editedContent = if (userEdited) state.editedContent else minutes.content
             )
+        }
+    }
+
+    /**
+     * Name a previously-anonymous diarized speaker (发言人A/…). Resolves/creates the participant,
+     * relabels all their segments to the real name, and promotes their captured clip into the
+     * voice library so they auto-identify in future meetings. Removes the label from the pending
+     * list; the minutes text itself is left to the user's existing {{name:}} edits.
+     */
+    fun assignSpeakerToLabel(label: String, name: String) {
+        val trimmed = name.trim()
+        if (trimmed.isBlank()) return
+        viewModelScope.launch {
+            try {
+                val participant = meetingRepo.resolveOrCreateParticipant(meetingId, trimmed, label)
+                transcriptionRepo.assignSpeakerName(meetingId, label, trimmed)
+                diarizationRepo.promoteAnonClipToSample(meetingId, label, participant.id)
+                uiState.update { st ->
+                    st.copy(
+                        unnamedSpeakerLabels = st.unnamedSpeakerLabels.filterNot { it == label },
+                        participants = if (st.participants.any { it.id == participant.id }) st.participants
+                                       else st.participants + participant
+                    )
+                }
+            } catch (e: Exception) {
+                uiState.update { it.copy(error = "标注发言人失败：${e.message}") }
+            }
         }
     }
 

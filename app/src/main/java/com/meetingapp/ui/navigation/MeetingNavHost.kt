@@ -11,6 +11,7 @@ import com.meetingapp.ui.screen.MeetingListScreen
 import com.meetingapp.ui.screen.MeetingSetupScreen
 import com.meetingapp.ui.screen.MinutesReviewScreen
 import com.meetingapp.ui.screen.SettingsScreen
+import com.meetingapp.ui.screen.VoiceLibraryScreen
 
 sealed class Screen(val route: String) {
     object List : Screen("meetings")
@@ -25,6 +26,7 @@ sealed class Screen(val route: String) {
         fun go(id: Long) = "review/$id"
     }
     object Settings : Screen("settings")
+    object VoiceLibrary : Screen("voice_library")
 }
 
 @Composable
@@ -87,7 +89,13 @@ fun MeetingNavHost() {
             )
         }
         composable(Screen.Settings.route) {
-            SettingsScreen(onBack = { navController.popBackStack() })
+            SettingsScreen(
+                onBack = { navController.popBackStack() },
+                onVoiceLibrary = { navController.navigate(Screen.VoiceLibrary.route) }
+            )
+        }
+        composable(Screen.VoiceLibrary.route) {
+            VoiceLibraryScreen(onBack = { navController.popBackStack() })
         }
     }
 }

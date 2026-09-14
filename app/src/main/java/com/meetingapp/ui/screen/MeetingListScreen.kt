@@ -9,6 +9,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -33,9 +34,18 @@ fun MeetingListScreen(
     vm: MeetingListViewModel = hiltViewModel()
 ) {
     val meetings by vm.meetings.collectAsState()
+    val quickMeetingId by vm.quickMeetingId.collectAsState()
     var pendingDelete by remember { mutableStateOf<Meeting?>(null) }
     var menuFor by remember { mutableStateOf<Meeting?>(null) }
     val hasActiveMeeting = meetings.any { it.status == MeetingStatus.RECORDING }
+
+    // A just-created quick meeting jumps straight into recording.
+    LaunchedEffect(quickMeetingId) {
+        quickMeetingId?.let { id ->
+            vm.consumeQuickMeetingId()
+            onOpenActive(id)
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -50,8 +60,15 @@ fun MeetingListScreen(
         },
         floatingActionButton = {
             if (!hasActiveMeeting) {
-                FloatingActionButton(onClick = onNewMeeting) {
-                    Icon(Icons.Default.Add, contentDescription = "新建会议")
+                Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    ExtendedFloatingActionButton(
+                        onClick = { vm.createQuickMeeting() },
+                        icon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
+                        text = { Text("直接开会") }
+                    )
+                    FloatingActionButton(onClick = onNewMeeting) {
+                        Icon(Icons.Default.Add, contentDescription = "新建会议")
+                    }
                 }
             }
         }

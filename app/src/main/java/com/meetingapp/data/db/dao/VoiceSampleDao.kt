@@ -35,8 +35,19 @@ interface VoiceSampleDao {
     @Query("SELECT * FROM voice_samples WHERE participantId = :participantId ORDER BY qualityScore DESC")
     suspend fun getForParticipant(participantId: Long): List<VoiceSample>
 
+    /** Every stored sample paired with its participant (for the settings voice library view). */
+    @Transaction
+    @Query("SELECT * FROM voice_samples ORDER BY participantId, qualityScore DESC")
+    suspend fun getAllWithParticipant(): List<NamedVoiceSample>
+
+    @Query("SELECT * FROM voice_samples WHERE id = :id")
+    suspend fun getById(id: Long): VoiceSample?
+
     @Insert
     suspend fun insert(sample: VoiceSample): Long
+
+    @Query("DELETE FROM voice_samples WHERE id = :id")
+    suspend fun deleteById(id: Long)
 
     @Query("DELETE FROM voice_samples WHERE participantId = :participantId")
     suspend fun deleteForParticipant(participantId: Long)

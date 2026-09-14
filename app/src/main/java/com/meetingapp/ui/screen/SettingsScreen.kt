@@ -1,5 +1,6 @@
 package com.meetingapp.ui.screen
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -8,7 +9,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -29,6 +32,7 @@ import com.meetingapp.viewmodel.SettingsViewModel
 @Composable
 fun SettingsScreen(
     onBack: () -> Unit,
+    onVoiceLibrary: () -> Unit = {},
     vm: SettingsViewModel = hiltViewModel()
 ) {
     val state by vm.uiState.collectAsState()
@@ -122,6 +126,19 @@ fun SettingsScreen(
             }
 
             Spacer(Modifier.height(16.dp))
+            HorizontalDivider()
+            Spacer(Modifier.height(8.dp))
+
+            // Voice library — view / annotate / delete stored voiceprints.
+            ListItem(
+                modifier = Modifier.clickable { onVoiceLibrary() },
+                leadingContent = { Icon(Icons.Default.GraphicEq, null) },
+                headlineContent = { Text("声纹库") },
+                supportingContent = { Text("查看、试听、标注或删除保存的声纹") },
+                trailingContent = { Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, null) }
+            )
+
+            Spacer(Modifier.height(8.dp))
             HorizontalDivider()
             Text(
                 "麦克风建议：手机平放桌面中央，屏幕朝上，勿遮挡麦克风。" +

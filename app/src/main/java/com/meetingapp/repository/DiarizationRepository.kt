@@ -18,6 +18,29 @@ import java.io.File
 import javax.inject.Inject
 import javax.inject.Singleton
 
+/** A participant's stored voice samples, for the settings voice-library view. */
+data class NamedVoiceGroup(
+    val participantId: Long,
+    val participantName: String,
+    val samples: List<VoiceSample>
+)
+
+/** A still-anonymous captured speaker (meeting + 发言人X) and its clips, awaiting a name. */
+data class PendingVoiceGroup(
+    val meetingId: Long,
+    val speakerLabel: String,
+    val clips: List<PendingVoiceSample>
+)
+
+/** The whole voice library at a glance: named participants + unnamed captured speakers. */
+data class VoiceLibrarySnapshot(
+    val named: List<NamedVoiceGroup>,
+    val pending: List<PendingVoiceGroup>
+) {
+    val namedSampleCount: Int get() = named.sumOf { it.samples.size }
+    val pendingSampleCount: Int get() = pending.sumOf { it.clips.size }
+}
+
 /**
  * In-meeting incremental diarization (see plan). For each ~5-minute window:
  *  1. build ≤4 known-voice references from participants who have a stored [VoiceSample]
@@ -186,6 +209,52 @@ class DiarizationRepository @Inject constructor(
     /** Anonymous speaker labels (发言人A/…) still awaiting a name in this meeting. */
     suspend fun pendingAnonLabels(meetingId: Long): List<String> =
         pendingVoiceSampleDao.getPendingLabels(meetingId)
+
+    // ---- Voice library management (Settings screen) ----
+
+    /**
+     * Snapshot of the whole voice library for the settings view: every named participant's
+     * samples (grouped) and every still-anonymous captured clip (grouped by meeting+label).
+     */
+    suspend fun voiceLibrarySnapshot(): VoiceLibrarySnapshot {
+        val named = voiceSampleDao.getAllWithParticipant()
+            .groupBy { it.participant.id }
+            .map { (_, rows) ->
+                NamedVoiceGroup(
+                    participantId = rows.first().participant.id,
+                    participantName = rows.first().participant.name,
+                    samples = rows.map { it.sample }
+                )
+            }
+            .sortedBy { it.participantName }
+        val pending = pendingVoiceSampleDao.getAll()
+            .groupBy { it.meetingId to it.speakerLabel }
+            .map { (key, clips) ->
+                PendingVoiceGroup(
+                    meetingId = key.first,
+                    speakerLabel = key.second,
+                    clips = clips
+                )
+            }
+            .sortedWith(compareBy({ it.meetingId }, { it.speakerLabel }))
+        return VoiceLibrarySnapshot(named = named, pending = pending)
+    }
+
+    /** Delete a single named voice sample (row + on-disk file). */
+    suspend fun deleteVoiceSample(sampleId: Long) {
+        val sample = voiceSampleDao.getById(sampleId) ?: return
+        runCatching { File(sample.filePath).delete() }
+        voiceSampleDao.deleteById(sampleId)
+        Log.d("DiarizationRepo", "Deleted voice sample $sampleId")
+    }
+
+    /** Delete a single still-anonymous captured clip (row + on-disk file). */
+    suspend fun deletePendingSample(sampleId: Long) {
+        val sample = pendingVoiceSampleDao.getById(sampleId) ?: return
+        runCatching { File(sample.filePath).delete() }
+        pendingVoiceSampleDao.deleteById(sampleId)
+        Log.d("DiarizationRepo", "Deleted pending voice sample $sampleId")
+    }
 
     /**
      * Delete unnamed pending voice clips older than the retention window (files + rows). Named

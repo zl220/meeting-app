@@ -31,6 +31,8 @@ class OpenAiDiarizeApi @Inject constructor(
         )
         val modelBody = Constants.MODEL_TRANSCRIBE_DIARIZE.toRequestBody("text/plain".toMediaTypeOrNull())
         val formatBody = "diarized_json".toRequestBody("text/plain".toMediaTypeOrNull())
+        // Diarization models require a chunking_strategy; "auto" lets the server segment the audio.
+        val chunkingBody = "auto".toRequestBody("text/plain".toMediaTypeOrNull())
 
         // Hard cap at 4 known references (OpenAI limit); names and refs are positional pairs.
         val refs = knownSpeakers.take(Constants.DIARIZE_MAX_KNOWN_SPEAKERS)
@@ -55,6 +57,7 @@ class OpenAiDiarizeApi @Inject constructor(
             file = filePart,
             model = modelBody,
             responseFormat = formatBody,
+            chunkingStrategy = chunkingBody,
             knownSpeakerNames = nameParts,
             knownSpeakerRefs = refParts
         )

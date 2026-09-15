@@ -30,6 +30,8 @@ interface OpenAiService {
         @Part file: MultipartBody.Part,
         @Part("model") model: RequestBody,
         @Part("response_format") responseFormat: RequestBody,
+        // Required by diarization models: how the server segments the audio ("auto").
+        @Part("chunking_strategy") chunkingStrategy: RequestBody,
         @Part knownSpeakerNames: List<MultipartBody.Part>,
         @Part knownSpeakerRefs: List<MultipartBody.Part>
     ): DiarizedResponse

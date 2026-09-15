@@ -67,9 +67,13 @@ fun ActiveMeetingScreen(
     val segments by vm.segments.collectAsState()
     val amplitude by vm.amplitude.collectAsState()
     val listState = rememberLazyListState()
-    val scope = rememberCoroutineScope()
 
     LaunchedEffect(meetingId) { vm.load(meetingId) }
+
+    // Navigate to review only once finalize (including trailing diarization) is complete.
+    LaunchedEffect(state.finished) {
+        if (state.finished) onFinished()
+    }
 
     LaunchedEffect(micPermission.status.isGranted) {
         if (micPermission.status.isGranted) vm.startMeeting()
@@ -202,15 +206,23 @@ fun ActiveMeetingScreen(
             )
 
             Button(
-                onClick = {
-                    scope.launch {
-                        vm.stopMeetingAndFinish()
-                        onFinished()
-                    }
-                },
+                onClick = { vm.stopMeetingAndFinish() },
+                enabled = !state.finishing,
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-            ) { Text("结束会议") }
+            ) {
+                if (state.finishing) {
+                    CircularProgressIndicator(
+                        Modifier.size(18.dp),
+                        color = MaterialTheme.colorScheme.onError,
+                        strokeWidth = 2.dp
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("正在整理…")
+                } else {
+                    Text("结束会议")
+                }
+            }
 
             Spacer(Modifier.height(8.dp))
         }

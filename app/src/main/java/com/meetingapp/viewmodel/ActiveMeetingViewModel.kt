@@ -57,6 +57,9 @@ data class ActiveMeetingUiState(
     // Minutes preview dialog (R10). previewOpen drives visibility; content is null while loading.
     val previewOpen: Boolean = false,
     val previewContent: String? = null,
+    // Finishing: work in flight (stop + diarize + finalize). finished: done, UI may navigate.
+    val finishing: Boolean = false,
+    val finished: Boolean = false,
     val error: String? = null
 )
 
@@ -188,21 +191,30 @@ class ActiveMeetingViewModel @Inject constructor(
         startTimer()
     }
 
-    // Returns only after DB is updated so the caller can navigate immediately.
-    suspend fun stopMeetingAndFinish() {
-        timerJob?.cancel()
-        val finalChunk = recordingService?.stopRecording()
-        // Read the full-recording path and the trailing diarization window before unbinding
-        // drops the service reference.
-        val audioPath = recordingService?.fullAudioFilePath()
-        val finalWindow = recordingService?.takeFinalWindow()
-        try { context.unbindService(serviceConnection) } catch (_: Exception) {}
-        finalChunk?.let { processChunk(it) }
-        // Diarize the last window so its speakers are backfilled before minutes finalize.
-        // Best-effort: swallow failures so meeting completion is never blocked.
-        finalWindow?.let { runCatching { diarizationRepo.processWindow(meetingId, it) } }
-        meetingRepo.setFinished(meetingId)
-        meetingRepo.setAudioFilePath(meetingId, audioPath)
+    /**
+     * Stop recording and finalize the meeting. Runs entirely on [viewModelScope] — NOT the
+     * caller's composition scope — so the trailing diarization network call isn't cancelled when
+     * the screen navigates away. The UI observes [uiState].finished to navigate once done.
+     */
+    fun stopMeetingAndFinish() {
+        if (uiState.value.finishing) return
+        uiState.update { it.copy(finishing = true) }
+        viewModelScope.launch {
+            timerJob?.cancel()
+            val finalChunk = recordingService?.stopRecording()
+            // Read the full-recording path and the trailing diarization window before unbinding
+            // drops the service reference.
+            val audioPath = recordingService?.fullAudioFilePath()
+            val finalWindow = recordingService?.takeFinalWindow()
+            try { context.unbindService(serviceConnection) } catch (_: Exception) {}
+            finalChunk?.let { processChunk(it) }
+            // Diarize the last window so its speakers are backfilled before minutes finalize.
+            // Best-effort: swallow failures so meeting completion is never blocked.
+            finalWindow?.let { runCatching { diarizationRepo.processWindow(meetingId, it) } }
+            meetingRepo.setFinished(meetingId)
+            meetingRepo.setAudioFilePath(meetingId, audioPath)
+            uiState.update { it.copy(finished = true) }
+        }
     }
 
     fun pauseMicForPtt() = recordingService?.pauseForSpeechRecognizer()

@@ -76,6 +76,10 @@ class DiarizationRepository @Inject constructor(
                 return
             }
             fuse(meetingId, window, turns)
+        } catch (e: retrofit2.HttpException) {
+            // Surface the OpenAI error body (it explains WHY the request was rejected).
+            val body = runCatching { e.response()?.errorBody()?.string() }.getOrNull()
+            Log.e("DiarizationRepo", "diarize HTTP ${e.code()} for ${window.file.name}: $body", e)
         } catch (e: Exception) {
             Log.e("DiarizationRepo", "diarize failed for ${window.file.name}", e)
         } finally {
@@ -85,18 +89,25 @@ class DiarizationRepository @Inject constructor(
     }
 
     /**
-     * Pick up to 4 attendees who have a stored voice sample, contributing each person's
-     * best-scored clip. Ordered by that clip's quality so the strongest references win the
-     * limited 4 slots (degrade path for meetings with >4 known people).
+     * Pick up to 4 known-voice references, contributing each person's best-scored clip, ordered
+     * by clip quality so the strongest references win the limited 4 slots.
+     *
+     * The meeting's listed attendees are preferred (they're the expected speakers). But a meeting
+     * often has no participant list at all — e.g. a "直接开会" quick meeting — so we must NOT gate
+     * recognition on attendance: whenever there's spare room in the 4 slots (or no attendees at
+     * all), we fill it from the rest of the voice library. Otherwise saved voiceprints would never
+     * be used and every speaker would come back anonymous.
      */
     private suspend fun buildKnownSpeakers(meetingId: Long): List<KnownSpeaker> {
         val attendeeIds = meetingRepo.getParticipants(meetingId).map { it.id }.toSet()
-        if (attendeeIds.isEmpty()) return emptyList()
-        return voiceSampleDao.getBestPerParticipant()
-            .filter { it.participant.id in attendeeIds }
-            .sortedByDescending { it.sample.qualityScore }
+        val bestPerParticipant = voiceSampleDao.getBestPerParticipant()
+            .filter { File(it.sample.filePath).exists() }
+        // Attendees first, then everyone else in the library — both by descending clip quality —
+        // so listed attendees claim slots before the fallback, but empty slots still get filled.
+        val (attendees, others) = bestPerParticipant.partition { it.participant.id in attendeeIds }
+        return (attendees.sortedByDescending { it.sample.qualityScore } +
+                others.sortedByDescending { it.sample.qualityScore })
             .map { KnownSpeaker(it.participant.name, File(it.sample.filePath)) }
-            .filter { it.sample.exists() }
             .take(Constants.DIARIZE_MAX_KNOWN_SPEAKERS)
     }
 

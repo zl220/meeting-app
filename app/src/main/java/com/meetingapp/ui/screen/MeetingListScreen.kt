@@ -6,7 +6,6 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.PlayArrow
@@ -61,14 +60,20 @@ fun MeetingListScreen(
         floatingActionButton = {
             if (!hasActiveMeeting) {
                 Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    // Secondary: create a meeting and fill in details first.
+                    ExtendedFloatingActionButton(
+                        onClick = onNewMeeting,
+                        icon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                        text = { Text("新建会议") },
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        contentColor = MaterialTheme.colorScheme.onSecondaryContainer
+                    )
+                    // Primary: one-tap straight into recording.
                     ExtendedFloatingActionButton(
                         onClick = { vm.createQuickMeeting() },
                         icon = { Icon(Icons.Default.PlayArrow, contentDescription = null) },
                         text = { Text("直接开会") }
                     )
-                    FloatingActionButton(onClick = onNewMeeting) {
-                        Icon(Icons.Default.Add, contentDescription = "新建会议")
-                    }
                 }
             }
         }
@@ -78,7 +83,7 @@ fun MeetingListScreen(
                 Modifier.fillMaxSize().padding(padding),
                 contentAlignment = Alignment.Center
             ) {
-                Text("还没有会议记录，点 + 新建", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("还没有会议记录，点「直接开会」开始", color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         } else {
             LazyColumn(Modifier.fillMaxSize().padding(padding)) {
